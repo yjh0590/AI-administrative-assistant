@@ -130,7 +130,30 @@ h1 { margin: 0; font-size: clamp(1.9rem, 5vw, 3.65rem); line-height: 1.11; lette
 h2 { margin: 0 0 12px; font-size: 1.15rem; }
 p { line-height: 1.6; }
 .muted, .briefing-schedule { color: var(--muted); }
-.briefing-schedule { margin: 14px 0 21px; font-size: .95rem; }
+.kaiyon-greeting {
+  display: table;
+  position: relative;
+  margin: 15px 0 0;
+  padding: 8px 12px;
+  border: 1px solid #6f5886;
+  border-radius: 11px;
+  background: #302441;
+  color: #f2e5ff;
+  font-size: .9rem;
+}
+.kaiyon-greeting::after {
+  content: "";
+  position: absolute;
+  right: -5px;
+  top: calc(50% - 4px);
+  width: 8px;
+  height: 8px;
+  transform: rotate(45deg);
+  border-top: 1px solid #6f5886;
+  border-right: 1px solid #6f5886;
+  background: inherit;
+}
+.briefing-schedule { margin: 12px 0 17px; font-size: .9rem; }
 .login-panel { max-width: 560px; }
 .primary-link, button {
   display: inline-flex;
@@ -193,11 +216,66 @@ p { line-height: 1.6; }
   filter: drop-shadow(0 0 6px #e3caffbc);
   animation: orbit 58s linear infinite;
 }
-.dial-face { z-index: 1; display: grid; justify-items: center; gap: 5px; }
-.dial-label { color: #ddd0f4; font: 600 .7rem var(--mono); letter-spacing: .19em; }
+.kaiyon-frame {
+  position: absolute;
+  z-index: 1;
+  inset: 9%;
+  overflow: hidden;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 38%, #aa8cc356, #2b1f3b44 70%);
+}
+.kaiyon-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transform: scale(.89);
+  animation: kaiyon-float 5.4s ease-in-out infinite;
+}
+.kaiyon-frame::after {
+  content: "";
+  position: absolute;
+  inset: 3%;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 0 22px 3px #b08aee99;
+  opacity: 0;
+}
+.dial[data-state="working"] .dial-arc { animation-duration: 5s; }
+.dial[data-state="working"] .kaiyon-frame::after { opacity: .7; }
+.dial[data-state="speaking"] .kaiyon-frame::after { animation: kaiyon-speaking 1.2s ease-in-out infinite; }
+.dial[data-state="ready"] .kaiyon-frame::after { animation: kaiyon-ready 1.8s ease-out both; }
+@keyframes kaiyon-float {
+  0%, 100% { transform: translateY(2px) scale(.89); }
+  50% { transform: translateY(-5px) scale(.89); }
+}
+@keyframes kaiyon-speaking {
+  0%, 100% { opacity: .25; }
+  50% { opacity: .95; }
+}
+@keyframes kaiyon-ready {
+  0% { opacity: 0; }
+  26% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.dial-face {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  bottom: 6%;
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+  padding: 7px 9px;
+  border: 1px solid #d0b7ff45;
+  border-radius: 12px;
+  background: #1a122ac9;
+  box-shadow: 0 4px 22px #0c081e88;
+}
+.dial-label { color: #ddd0f4; font: 600 .6rem var(--mono); letter-spacing: .08em; }
 .clock {
   color: #faf2ff;
-  font: 650 clamp(2rem, 5vw, 3.6rem)/1 var(--mono);
+  font: 650 clamp(1.2rem, 2.7vw, 1.75rem)/1 var(--mono);
   font-variant-numeric: tabular-nums;
   letter-spacing: -.09em;
   text-shadow: 0 0 26px #c2a6ffbb;
@@ -282,6 +360,18 @@ input {
 }
 .cards { display: grid; gap: 11px; margin-top: 14px; }
 .card, .settings { padding: 19px; }
+#agenda-setup { margin-top: 14px; }
+#agenda-setup summary { cursor: pointer; font-weight: 650; }
+#timetable { margin-top: 14px; }
+#timetable-photo, #timetable-preview, #timetable-text, #timetable .actions { margin-top: 12px; }
+#timetable-photo, #timetable-preview { max-width: 100%; }
+#timetable-preview { display: block; max-height: 440px; object-fit: contain; }
+#timetable-text p { white-space: pre-wrap; }
+.class-edit { border: 1px solid rgba(178, 164, 255, .25); margin: 14px 0 0; padding: 12px; min-width: 0; }
+.class-edit label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.class-edit input, .class-edit select { min-width: 0; width: 100%; }
+.class-edit select { padding: 9px; background: #19132e; color: inherit; border-radius: 8px; }
+.class-times { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
 .card p { margin: 5px 0 0; }
 ul { padding: 0; list-style: none; margin: 0; }
 li { padding: 10px 0; overflow-wrap: anywhere; }
@@ -318,16 +408,21 @@ a { color: var(--accent); text-underline-offset: .2em; }
     text-align: center;
   }
   .command-panel::after { inset: -20% -45%; }
-  .dial { grid-row: 1; width: min(62%, 216px); }
-  .clock { font-size: clamp(1.8rem, 9vw, 2.75rem); }
-  .dial-label { font-size: .6rem; }
+  .dial { grid-row: 1; width: min(70%, 226px); }
+  .dial-face { right: -4%; }
+  .kaiyon-greeting { margin: 12px auto 0; }
+  .kaiyon-greeting::after { right: auto; top: -5px; left: calc(50% - 4px); transform: rotate(-45deg); }
   .date { margin-bottom: 7px; font-size: .77rem; }
   .heading-break { display: none; }
   .briefing-schedule { margin: 8px 0 14px; }
+  .command-actions { justify-content: center; }
   .menu-link { min-height: 113px; padding: 12px; }
   .tool-arrow { right: 11px; top: 12px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .command-panel::after, .dial-arc { animation: none; }
+  .command-panel::after, .dial-arc, .kaiyon-frame img,
+  .dial[data-state] .kaiyon-frame::after { animation: none; }
+  .dial[data-state="speaking"] .kaiyon-frame::after,
+  .dial[data-state="ready"] .kaiyon-frame::after { opacity: .75; }
   .menu-link { transition: none; }
 }

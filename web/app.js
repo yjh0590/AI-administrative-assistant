@@ -2,6 +2,10 @@ const $ = id => document.getElementById(id);
 const dateFormat = new Intl.DateTimeFormat("ko-KR", { dateStyle: "full", timeZone: "Asia/Seoul" });
 const timeFormat = new Intl.DateTimeFormat("ko-KR", { hour: "numeric", minute: "numeric", timeZone: "Asia/Seoul" });
 const clockFormat = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "Asia/Seoul" });
+const kaiyonPortraits = [
+  { src: "/kaiyon-woman.webp", alt: "초승달 장식의 여성형 카이온" },
+  { src: "/kaiyon-man.webp", alt: "각진 갑옷의 남성형 카이온" },
+];
 const sourceLabels = {
   agenda: ["네이버 캘린더", "오늘 등록된 일정이 없어요."],
   news: ["관심 뉴스", "조건에 맞는 최근 기사가 없어요."],
@@ -9,6 +13,7 @@ const sourceLabels = {
 };
 const featureTitles = {
   briefing: "오늘의 브리핑",
+  school: "학교 시간표",
   agenda: "네이버 일정",
   news: "관심 뉴스",
   bookings: "콕콕 예약",
@@ -16,12 +21,28 @@ const featureTitles = {
 };
 const canSpeak = "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
 let digest;
+let schoolToday;
 let speaking;
 let poll;
 let toastTimer;
 let serviceWorker;
 let device;
 let renderedContent;
+let briefingBusy = false;
+let briefingCompleted = false;
+let completionTimer;
+
+function choosePortrait() {
+  const image = $("kaiyon-portrait");
+  const portrait = kaiyonPortraits[Math.floor(Math.random() * kaiyonPortraits.length)];
+  image.alt = portrait.alt;
+  image.src = portrait.src;
+  image.hidden = false;
+}
+
+function isStandalone() {
+  return navigator.standalone || matchMedia("(display-mode: standalone)").matches;
+}
 
 function updateClock() {
   const clock = $("clock");
@@ -37,6 +58,28 @@ function connectionState(online) {
   $("connection-label").textContent = online ? "서버 연결됨" : "서버 연결 끊김";
 }
 
+function renderKaiyonActivity() {
+  const display = $("kaiyon-display");
+  if (speaking) display.dataset.state = "speaking";
+  else if (briefingBusy) display.dataset.state = "working";
+  else display.dataset.state = briefingCompleted ? "ready" : "idle";
+}
+
+function setBriefingActivity(busy, completed = false) {
+  briefingBusy = busy;
+  if (busy || completed) {
+    clearTimeout(completionTimer);
+    briefingCompleted = completed;
+  }
+  if (completed) {
+    completionTimer = setTimeout(() => {
+      briefingCompleted = false;
+      renderKaiyonActivity();
+    }, 1800);
+  }
+  renderKaiyonActivity();
+}
+
 function message(content, keep = false) {
   clearTimeout(toastTimer);
   $("status").textContent = content;
@@ -45,8 +88,10 @@ function message(content, keep = false) {
 }
 
 async function api(path, data) {
+  const photo = data instanceof Blob;
   const response = await fetch(path, data === undefined ? {} : {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+    method: "POST", headers: { "Content-Type": photo ? data.type : "application/json" },
+    body: photo ? data : JSON.stringify(data),
   });
   if (!response.ok) {
     const result = await response.json().catch(() => ({}));
@@ -58,9 +103,14 @@ async function api(path, data) {
 
 function showLogin() {
   clearTimeout(poll);
+  clearTimeout(completionTimer);
   if (canSpeak) speechSynthesis.cancel();
   finishSpeaking();
   digest = null;
+  schoolToday = null;
+  clearTimetableEditor();
+  briefingCompleted = false;
+  setBriefingActivity(false);
   renderedContent = null;
   $("briefing").replaceChildren();
   $("dashboard").hidden = true;
@@ -137,26 +187,36 @@ function renderView(navigated = false) {
   const route = location.hash.slice(1);
   const feature = Object.hasOwn(featureTitles, route) ? route : null;
   const settings = feature === "settings";
+  const school = feature === "school";
   const fullBriefing = feature === "briefing";
+  if (!feature && !$("kaiyon-portrait").hasAttribute("src")) choosePortrait();
   $("menu").hidden = Boolean(feature);
   $("feature").hidden = !feature;
   $("settings").hidden = !settings;
-  $("briefing-tools").hidden = !feature || settings;
+  $("briefing-tools").hidden = !feature || settings || school;
   $("briefing").hidden = !feature || settings;
+  $("timetable").hidden = !school;
+  if (school) loadTimetableEditor();
+  const agendaSetup = $("agenda-setup");
+  if (feature === "agenda" && (navigated || agendaSetup.hidden)) {
+    agendaSetup.open = !digest || digest.agenda.status === "unconfigured";
+  }
+  agendaSetup.hidden = feature !== "agenda";
   $("listen").hidden = !fullBriefing;
   $("feature-title").textContent = feature ? featureTitles[feature] : "";
 
-  if (!fullBriefing && speaking) {
+  if (feature && !fullBriefing && speaking) {
     speechSynthesis.cancel();
     finishSpeaking();
   }
   if (feature && !settings) {
-    const contentKey = `${feature}:${digest?.generated ?? ""}`;
+    const contentKey = `${feature}:${digest?.generated ?? ""}:${JSON.stringify(schoolToday)}`;
     if (renderedContent !== contentKey) {
       const sections = fullBriefing ? Object.keys(sourceLabels) : [feature];
-      const cards = digest ? sections.map(kind => card(kind, fullBriefing)) : [
+      const cards = school ? [] : digest ? sections.map(kind => card(kind, fullBriefing)) : [
         node("p", "‘지금 확인’을 누르면 오늘 정보를 가져와요.", "card muted"),
       ];
+      if (school || (fullBriefing && schoolToday)) cards.unshift(schoolCard());
       $("briefing").replaceChildren(...cards);
       renderedContent = contentKey;
     }
@@ -170,7 +230,11 @@ function renderView(navigated = false) {
 async function load() {
   clearTimeout(poll);
   const result = await api("/api/briefing");
+  const completed = briefingBusy && !result.busy && !result.failed &&
+    result.briefing?.generated && result.briefing.generated !== digest?.generated;
   digest = result.briefing;
+  schoolToday = result.school;
+  setBriefingActivity(result.busy, Boolean(completed));
   $("login").hidden = true;
   $("dashboard").hidden = false;
   connectionState(true);
@@ -178,10 +242,15 @@ async function load() {
   const updated = digest ? ` · ${timeFormat.format(new Date(digest.generated))} 기준` : "";
   $("schedule").textContent = `매일 ${result.schedule} 브리핑${updated}`;
   $("menu-schedule").textContent = result.busy ? "브리핑을 만드는 중" : `매일 ${result.schedule} 브리핑`;
+  const greeting = $("kaiyon-greeting");
+  if (result.busy) greeting.textContent = "주인님, 지금 자료를 확인 중입니다.";
+  else if (digest || schoolToday) greeting.textContent = "주인님, 오늘 브리핑을 준비했습니다.";
+  else greeting.textContent = "주인님, 오늘 브리핑을 준비할까요?";
   for (const kind of Object.keys(sourceLabels)) $(`${kind}-state`).textContent = menuStatus(kind);
+  $("school-state").textContent = schoolToday ? `오늘 수업 ${schoolToday.length}개` : "시간표 등록";
   $("refresh").disabled = result.busy;
   $("refresh").textContent = result.busy ? "확인 중…" : "지금 확인";
-  $("listen").disabled = !digest || !canSpeak;
+  for (const id of ["listen", "listen-quick"]) $(id).disabled = !canSpeak || !(digest || schoolToday || speaking);
   renderView();
   if (result.failed) message("브리핑을 만들지 못했어요. 잠시 후 다시 확인해 주세요.");
   const interval = result.busy ? 1200 : 30_000;
@@ -198,12 +267,23 @@ function pollBriefing() {
 }
 
 function spokenText(content) {
-  const agenda = content.agenda.items;
-  const parts = ["오늘의 브리핑입니다."];
-  if (agenda.length) parts.push(`일정 ${agenda.length}건입니다.`, ...agenda.map(item => `${eventLabel(item, content.date)}. ${item.title}.`));
-  if (content.news.items.length) parts.push("관심 뉴스입니다.", ...content.news.items.map(item => `${item.title}. ${item.summary}`));
-  if (content.bookings.items.length) parts.push("콕콕 예약 확인입니다.", ...content.bookings.items.map(item => `${item.title}. ${item.status}.`));
-  for (const key of Object.keys(sourceLabels)) {
+  const agenda = content?.agenda.items ?? [];
+  const parts = ["주인님, 오늘의 브리핑입니다."];
+  if (schoolToday?.length) {
+    const first = schoolToday[0];
+    const place = first.room ? ` 강의실은 ${first.room}입니다.` : "";
+    parts.push(`오늘 수업은 ${schoolToday.length}개입니다. 첫 수업은 ${timeFormat.format(new Date(first.start))} ${first.title}입니다.${place}`);
+  } else if (schoolToday) parts.push("오늘 등록된 수업은 없습니다.");
+  if (agenda.length) {
+    const first = agenda.find(item => !item.all_day) ?? agenda[0];
+    const firstTime = first.start.startsWith(content.date) ? timeFormat.format(new Date(first.start)) : "이전부터 이어지는";
+    const firstEvent = first.all_day ? `종일 일정인 ${first.title}` : `${firstTime} ${first.title}`;
+    parts.push(`오늘 일정은 ${agenda.length}건입니다. 첫 일정은 ${firstEvent}입니다.`);
+  }
+  const headlines = content?.news.items.slice(0, 3) ?? [];
+  if (headlines.length) parts.push("관심 뉴스 제목입니다.", ...headlines.map(item => `${item.title}.`));
+  for (const key of ["agenda", "news"]) {
+    if (!content) break;
     const notice = sourceNotice(key, content[key]);
     if (notice && content[key].status !== "unconfigured") parts.push(notice);
   }
@@ -211,13 +291,13 @@ function spokenText(content) {
   return parts.join(" ");
 }
 
-$("listen").addEventListener("click", () => {
+function toggleSpeech() {
   if (speaking) {
     speechSynthesis.cancel();
     finishSpeaking();
     return;
   }
-  if (!digest) return;
+  if (!digest && !schoolToday) return;
   const utterance = new SpeechSynthesisUtterance(spokenText(digest));
   utterance.lang = "ko-KR";
   const voice = speechSynthesis.getVoices().find(option => option.lang.toLowerCase().startsWith("ko"));
@@ -229,14 +309,24 @@ $("listen").addEventListener("click", () => {
     if (!["canceled", "interrupted"].includes(event.error)) message("음성을 재생하지 못했어요. 기기의 한국어 음성 설정을 확인해 주세요.");
   };
   speaking = utterance;
-  $("listen").textContent = "듣기 중지";
+  updateSpeechControls();
   speechSynthesis.speak(utterance);
-});
+}
+
+function updateSpeechControls() {
+  for (const id of ["listen", "listen-quick"]) {
+    $(id).textContent = speaking ? "듣기 중지" : "브리핑 듣기";
+  }
+  renderKaiyonActivity();
+}
 
 function finishSpeaking() {
   speaking = null;
-  $("listen").textContent = "브리핑 듣기";
+  updateSpeechControls();
 }
+
+$("listen").addEventListener("click", toggleSpeech);
+$("listen-quick").addEventListener("click", toggleSpeech);
 
 function showPush() {
   $("push").disabled = !serviceWorker;
@@ -247,10 +337,9 @@ function showPush() {
 
 async function startPush() {
   const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
-  const standalone = navigator.standalone || matchMedia("(display-mode: standalone)").matches;
-  if (ios && !standalone) {
+  if (ios && !isStandalone()) {
     $("push-help").hidden = false;
-    $("push-help").textContent = "Safari 공유 메뉴에서 ‘홈 화면에 추가’를 선택한 뒤, 홈 화면의 AI 비서 아이콘을 열어 알림을 켜세요.";
+    $("push-help").textContent = "Safari 공유 메뉴에서 ‘홈 화면에 추가’를 선택한 뒤, 홈 화면의 카이온 아이콘을 열어 알림을 켜세요.";
     return;
   }
   if (!(window.isSecureContext && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window)) {
@@ -307,11 +396,13 @@ $("push-test").addEventListener("click", async () => {
 
 $("refresh").addEventListener("click", async () => {
   $("refresh").disabled = true;
+  setBriefingActivity(true);
   try {
     await api("/api/briefing/refresh", {});
     await load();
   } catch (error) {
     $("refresh").disabled = false;
+    setBriefingActivity(false);
     message(error.message);
   }
 });
@@ -337,7 +428,11 @@ $("login-form").addEventListener("submit", async event => {
 });
 
 window.addEventListener("hashchange", () => renderView(true));
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && isStandalone() && !$("dashboard").hidden) choosePortrait();
+});
 updateClock();
+initializeTimetable();
 setInterval(updateClock, 1000);
 load().catch(error => { if ($("login").hidden) message(error.message); });
 startPush();

@@ -149,6 +149,33 @@ class AssistantTest(unittest.TestCase):
         self.assertIn("Secure", response.headers["Set-Cookie"])
         self.assertIn("Expires=", response.headers["Set-Cookie"])
 
+    def test_timetable_photo_and_confirmed_classes_are_separate(self):
+        photo = {"data": b"\x89PNG\r\n\x1a\nfixture", "content_type": "image/png"}
+        self.assertEqual(self.client.post("/api/timetable/photo", **photo).status_code, 401)
+        self.client.post("/api/session", json={"code": "test-very-long-access-code"})
+        with patch("app.read_photo", return_value={"text": "행정학", "words": []}) as recognize:
+            blocked = self.client.post("/api/timetable/photo", headers={"Origin": "https://other.test"}, **photo)
+            self.assertEqual(blocked.status_code, 403)
+            self.assertEqual(self.client.post("/api/timetable/photo", **photo).json["text"], "행정학")
+            recognize.assert_called_once_with(photo["data"])
+        self.assertEqual(self.client.get("/api/timetable").json, {"classes": []})
+        with patch("app.datetime") as clock:
+            clock.now.return_value = self.due
+            row = {"day": self.due.weekday(), "start": "09:00", "end": "10:30", "title": "행정학", "room": "101"}
+            other_day = {**row, "day": (row["day"] + 1) % 7}
+            self.assertEqual(self.client.post("/api/timetable", json={"classes": [row, other_day]}).status_code, 200)
+            self.assertEqual(self.client.post("/api/timetable", json={"classes": [{**row, "end": "07:00"}]}).status_code, 400)
+            today = self.client.get("/api/briefing").json["school"]
+            self.assertEqual(len(today), 1)
+            self.assertEqual(today[0]["start"], "2026-11-25T09:00:00+09:00")
+            self.assertEqual(today[0]["title"], "행정학")
+
+    def test_kaiyon_portraits_are_served_as_webp(self):
+        for variant in ("woman", "man"):
+            with self.client.get(f"/kaiyon-{variant}.webp") as response:
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.mimetype, "image/webp")
+
     def test_schedule_refreshes_early_preview_and_sends_once(self):
         self.assistant.register({"endpoint": "test-device"})
         self.assistant.refresh(self.due - timedelta(hours=1))

@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "AI 비서",
-  "short_name": "AI 비서",
+  "name": "카이온 AI 비서",
+  "short_name": "카이온",
   "lang": "ko",
   "start_url": "/",
   "scope": "/",

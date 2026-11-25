@@ -2,9 +2,11 @@ import base64
 import hmac
 import json
 import logging
+import mimetypes
 import os
 import secrets
 import sqlite3
+import subprocess
 import threading
 from contextlib import closing, contextmanager
 from datetime import datetime, time, timedelta
@@ -20,6 +22,7 @@ from pywebpush import WebPushException, webpush
 from waitress import serve
 
 from sources import SEOUL, build_briefing
+from timetable import classes_today, read_photo, validate_classes
 
 ROOT = Path(__file__).resolve().parent
 LOG = logging.getLogger(__name__)
@@ -57,6 +60,7 @@ class Assistant:
         self.briefing_time = briefing_time
         self.collect = collect
         self.generation_lock = threading.Lock()
+        self.photo_lock = threading.Lock()
         self.generation_failed = False
         self.key_file = directory / "vapid.pem"
         if not self.key_file.exists():
@@ -70,6 +74,7 @@ class Assistant:
         with self.db() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS briefings (day TEXT PRIMARY KEY, content TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS timetable (id INTEGER PRIMARY KEY CHECK (id = 1), content TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS devices (endpoint TEXT PRIMARY KEY, subscription TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS deliveries (
                     day TEXT NOT NULL, endpoint TEXT NOT NULL REFERENCES devices(endpoint) ON DELETE CASCADE,
@@ -88,6 +93,15 @@ class Assistant:
         with self.db() as db:
             row = db.execute("SELECT content FROM briefings WHERE day = ?", (day,)).fetchone()
         return json.loads(row[0]) if row else None
+
+    def timetable(self):
+        with self.db() as db:
+            row = db.execute("SELECT content FROM timetable WHERE id = 1").fetchone()
+        return json.loads(row[0]) if row else []
+
+    def save_timetable(self, rows):
+        with self.db() as db:
+            db.execute("INSERT OR REPLACE INTO timetable VALUES (1, ?)", (json.dumps(rows, ensure_ascii=False),))
 
     def refresh(self, now, background=False):
         if not self.generation_lock.acquire(blocking=False):
@@ -162,7 +176,7 @@ class Assistant:
             """, (day, retry_before)).fetchall()
         for (value,) in devices:
             sub = json.loads(value)
-            sent = self.notify(sub, "오늘의 아침 브리핑", "오늘 일정과 관심 뉴스를 확인하세요.", f"briefing-{day}")
+            sent = self.notify(sub, "오늘의 아침 브리핑", "카이온에서 오늘 브리핑을 확인하세요.", f"briefing-{day}")
             with self.db() as db:
                 db.execute("""
                     INSERT OR REPLACE INTO deliveries
@@ -179,6 +193,7 @@ class Assistant:
 
 
 def create_app(assistant, code, origin=""):
+    mimetypes.add_type("image/webp", ".webp")
     app = Flask(__name__, static_folder=str(ROOT / "web"), static_url_path="")
     app.config.update(
         SECRET_KEY=code, SESSION_COOKIE_NAME="ai_assistant_session",
@@ -193,7 +208,7 @@ def create_app(assistant, code, origin=""):
             request_origin = request.headers.get("Origin")
             if request_origin and request_origin != (origin or request.host_url.rstrip("/")):
                 abort(403)
-            if not request.is_json:
+            if not request.is_json and request.endpoint != "scan_timetable":
                 abort(415)
 
     @app.after_request
@@ -243,12 +258,49 @@ def create_app(assistant, code, origin=""):
     @app.get("/api/briefing")
     @require_login
     def current():
-        today = datetime.now(SEOUL).date().isoformat()
+        now = datetime.now(SEOUL)
+        today = now.date().isoformat()
         busy = assistant.generation_lock.locked()
+        timetable = assistant.timetable()
         return jsonify(
             date=today, briefing=assistant.briefing(today), schedule=assistant.briefing_time.strftime("%H:%M"),
-            busy=busy, failed=assistant.generation_failed,
+            busy=busy, failed=assistant.generation_failed, school=classes_today(timetable, now) if timetable else None,
         )
+
+    @app.get("/api/timetable")
+    @require_login
+    def get_timetable():
+        return jsonify(classes=assistant.timetable())
+
+    @app.post("/api/timetable")
+    @require_login
+    def save_timetable():
+        request.max_content_length = 64 * 1024
+        try:
+            rows = validate_classes(json_object().get("classes"))
+        except (KeyError, TypeError, ValueError):
+            return jsonify(error="과목, 요일, 시작·종료 시간을 확인해 주세요."), 400
+        assistant.save_timetable(rows)
+        return jsonify(classes=rows)
+
+    @app.post("/api/timetable/photo")
+    @require_login
+    def scan_timetable():
+        request.max_content_length = 4 * 1024 * 1024
+        if request.mimetype != "image/png":
+            return jsonify(error="PNG 시간표 사진을 선택해 주세요."), 415
+        photo = request.get_data()
+        if not photo.startswith(b"\x89PNG\r\n\x1a\n"):
+            return jsonify(error="시간표 사진을 열 수 없어요."), 400
+        if not assistant.photo_lock.acquire(blocking=False):
+            return jsonify(error="다른 사진을 읽는 중입니다. 잠시 뒤 다시 시도해 주세요."), 429
+        try:
+            return jsonify(read_photo(photo))
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            LOG.warning("Timetable OCR failed (%s)", type(error).__name__)
+            return jsonify(error="사진 인식에 실패했어요. 시간표를 보면서 수업을 직접 추가할 수 있어요."), 422
+        finally:
+            assistant.photo_lock.release()
 
     @app.post("/api/briefing/refresh")
     @require_login

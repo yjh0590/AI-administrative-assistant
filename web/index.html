@@ -4,16 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0d0b1d">
-  <title>AI 비서</title>
+  <title>카이온 · AI 비서</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/icon-192.png">
   <link rel="stylesheet" href="/style.css">
+  <script src="/timetable.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
   <main>
     <header class="top">
-      <div class="brand"><span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span>AI 비서</span></div>
+      <div class="brand"><span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span>카이온</span></div>
       <span id="connection" class="connection" hidden><i aria-hidden="true"></i><span id="connection-label"></span></span>
     </header>
     <section id="login" class="hero login-panel" hidden>
@@ -29,13 +30,20 @@
           <div class="command-copy">
             <p class="date" id="today"></p>
             <h1 id="menu-title" tabindex="-1">오늘의<br class="heading-break"> 브리핑</h1>
+            <p id="kaiyon-greeting" class="kaiyon-greeting">주인님, 오늘 브리핑을 준비할까요?</p>
             <p id="menu-schedule" class="briefing-schedule"></p>
-            <a class="primary-link" href="#briefing">브리핑 열기 <span aria-hidden="true">↗</span></a>
+            <div class="actions command-actions">
+              <a class="primary-link" href="#briefing">브리핑 열기 <span aria-hidden="true">↗</span></a>
+              <button id="listen-quick" class="secondary" type="button" disabled>브리핑 듣기</button>
+            </div>
           </div>
-          <div class="dial" role="group" aria-label="서울 현재 시각">
+          <div id="kaiyon-display" class="dial" data-state="idle">
             <div class="dial-track" aria-hidden="true"></div>
             <div class="dial-arc" aria-hidden="true"></div>
-            <div class="dial-face">
+            <div class="kaiyon-frame">
+              <img id="kaiyon-portrait" alt="" width="768" height="768" decoding="async" hidden>
+            </div>
+            <div class="dial-face" role="group" aria-label="서울 현재 시각">
               <span class="dial-label">서울 · KST</span>
               <time id="clock" class="clock" datetime="00:00:00">--:--</time>
             </div>
@@ -44,6 +52,7 @@
           </div>
         </div>
         <nav class="menu" aria-label="AI 비서 메뉴">
+          <a class="menu-link" href="#school"><span class="tool-icon calendar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>학교 시간표</strong><span class="tool-status" id="school-state">시간표 등록</span></a>
           <a class="menu-link" href="#agenda"><span class="tool-icon calendar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>네이버 일정</strong><span class="tool-status" id="agenda-state">오늘 일정</span></a>
           <a class="menu-link" href="#news"><span class="tool-icon news-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>관심 뉴스</strong><span class="tool-status" id="news-state">기사와 원문</span></a>
           <a class="menu-link" href="#bookings"><span class="tool-icon radar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>콕콕 예약</strong><span class="tool-status" id="bookings-state">페이지 확인 상태</span></a>
@@ -62,7 +71,30 @@
             </div>
           </div>
         </div>
+        <details id="agenda-setup" class="card" hidden>
+          <summary>네이버 캘린더 연결 방법</summary>
+          <ol>
+            <li>네이버 2단계 인증을 사용 중이면 CalDAV 연결용 애플리케이션 비밀번호를 발급받으세요.</li>
+            <li>카이온이 실행되는 PC의 <code>.env</code>에서 <code>NAVER_ID</code>와 <code>NAVER_APP_PASSWORD</code>를 설정하세요.</li>
+            <li>일부 캘린더만 보고 싶다면 <code>NAVER_CALENDARS</code>에 네이버에 표시되는 캘린더 이름을 입력하세요. 여러 개면 쉼표로 구분하세요.</li>
+            <li>카이온 서버를 다시 시작한 뒤 이 화면에서 <strong>지금 확인</strong>을 누르세요.</li>
+          </ol>
+          <a href="https://help.naver.com/service/5620/contents/2426?lang=ko&amp;osType=COMMONOS" target="_blank" rel="noopener noreferrer">네이버 공식 연동 안내 ↗</a>
+        </details>
         <div id="briefing" class="cards" hidden></div>
+        <form id="timetable" class="card" hidden>
+          <label for="timetable-photo">에브리타임 시간표 사진</label>
+          <p class="muted">요일과 왼쪽 시간 눈금이 보이게 캡처하세요. 읽어온 내용을 확인하고 저장하면 매주 해당 요일에 표시돼요.</p>
+          <input id="timetable-photo" type="file" accept="image/*">
+          <p id="timetable-status" class="muted" role="status"></p>
+          <canvas id="timetable-preview" hidden aria-label="첨부한 시간표 사진"></canvas>
+          <details id="timetable-text" hidden><summary>사진에서 읽은 글자</summary><p></p></details>
+          <div id="timetable-rows"></div>
+          <div class="actions">
+            <button id="timetable-add" type="button" class="secondary">수업 추가</button>
+            <button type="submit">시간표 저장</button>
+          </div>
+        </form>
         <div id="settings" class="settings" hidden>
           <div class="actions">
             <button id="push" class="secondary" disabled>휴대폰 알림 켜기</button>

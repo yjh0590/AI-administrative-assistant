@@ -247,7 +247,9 @@ async function load() {
   else if (digest || schoolToday) greeting.textContent = "주인님, 오늘 브리핑을 준비했습니다.";
   else greeting.textContent = "주인님, 오늘 브리핑을 준비할까요?";
   for (const kind of Object.keys(sourceLabels)) $(`${kind}-state`).textContent = menuStatus(kind);
-  $("school-state").textContent = schoolToday ? `오늘 수업 ${schoolToday.length}개` : "시간표 등록";
+  const work = ofKind(schoolToday, "work").length;
+  $("school-state").textContent = schoolToday
+    ? `오늘 수업 ${ofKind(schoolToday, "class").length}개${work ? ` · 근로 ${work}건` : ""}` : "시간표 등록";
   $("refresh").disabled = result.busy;
   $("refresh").textContent = result.busy ? "확인 중…" : "지금 확인";
   for (const id of ["listen", "listen-quick"]) $(id).disabled = !canSpeak || !(digest || schoolToday || speaking);
@@ -269,11 +271,19 @@ function pollBriefing() {
 function spokenText(content) {
   const agenda = content?.agenda.items ?? [];
   const parts = ["주인님, 오늘의 브리핑입니다."];
-  if (schoolToday?.length) {
-    const first = schoolToday[0];
-    const place = first.room ? ` 강의실은 ${first.room}입니다.` : "";
-    parts.push(`오늘 수업은 ${schoolToday.length}개입니다. 첫 수업은 ${timeFormat.format(new Date(first.start))} ${first.title}입니다.${place}`);
-  } else if (schoolToday) parts.push("오늘 등록된 수업은 없습니다.");
+  if (schoolToday) {
+    const lessons = ofKind(schoolToday, "class");
+    const work = ofKind(schoolToday, "work");
+    if (lessons.length) {
+      const first = lessons[0];
+      const place = first.room ? ` 강의실은 ${first.room}입니다.` : "";
+      parts.push(`오늘 수업은 ${lessons.length}개입니다. 첫 수업은 ${timeFormat.format(new Date(first.start))} ${first.title}입니다.${place}`);
+    } else parts.push("오늘 등록된 수업은 없습니다.");
+    if (work.length) {
+      parts.push(`근로는 ${work.length}건이고, ${work.map(item =>
+        `${timeFormat.format(new Date(item.start))}부터 ${timeFormat.format(new Date(item.end))}까지 ${item.title}`).join(", ")}입니다.`);
+    }
+  }
   if (agenda.length) {
     const first = agenda.find(item => !item.all_day) ?? agenda[0];
     const firstTime = first.start.startsWith(content.date) ? timeFormat.format(new Date(first.start)) : "이전부터 이어지는";

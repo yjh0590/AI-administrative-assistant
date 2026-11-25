@@ -1,21 +1,30 @@
 const weekdays = ["월", "화", "수", "목", "금", "토", "일"];
 
+const kinds = { class: "수업", work: "근로" };
+// Rows saved before kinds existed have no kind and are classes.
+const ofKind = (rows, kind) => (rows ?? []).filter(row => (row.kind ?? "class") === kind);
+
 function schoolCard() {
   const card = node("section", null, "card");
-  card.append(node("h2", "오늘 수업"));
+  card.append(node("h2", "오늘 학교"));
   if (!schoolToday?.length) {
-    card.append(node("p", schoolToday ? "오늘 등록된 수업이 없어요." : "등록한 시간표가 없어요.", "muted"));
+    card.append(node("p", schoolToday ? "오늘 등록된 수업과 근로가 없어요." : "등록한 시간표가 없어요.", "muted"));
     return card;
   }
-  const list = node("ul");
-  for (const item of schoolToday) {
-    const row = node("li");
-    const start = timeFormat.format(new Date(item.start));
-    const end = timeFormat.format(new Date(item.end));
-    row.append(node("strong", item.title), node("span", `${start} ~ ${end}${item.room ? ` · ${item.room}` : ""}`, "detail"));
-    list.append(row);
+  for (const [kind, label] of Object.entries(kinds)) {
+    const items = ofKind(schoolToday, kind);
+    if (!items.length) continue;
+    card.append(node("h3", label));
+    const list = node("ul");
+    for (const item of items) {
+      const row = node("li");
+      const start = timeFormat.format(new Date(item.start));
+      const end = timeFormat.format(new Date(item.end));
+      row.append(node("strong", item.title), node("span", `${start} ~ ${end}${item.room ? ` · ${item.room}` : ""}`, "detail"));
+      list.append(row);
+    }
+    card.append(list);
   }
-  card.append(list);
   return card;
 }
 
@@ -83,7 +92,7 @@ function timetableCandidates(canvas, words) {
           const last = inside.at(-1);
           const room = last.y > inside[0].y + inside[0].h * .65 && /\d/.test(last.text) ? last.text : "";
           const title = (room ? inside.slice(0, -1) : inside).map(word => word.text).join(" ");
-          rows.push({ day, title, room, start: toTime(start), end: toTime(y) });
+          rows.push({ day, kind: title.includes("근로") ? "work" : "class", title, room, start: toTime(start), end: toTime(y) });
         }
       }
       start = y;
@@ -95,7 +104,8 @@ function timetableCandidates(canvas, words) {
 
 function addClassRow(row = {}) {
   const field = node("fieldset", null, "class-edit");
-  field.append(node("legend", "수업"));
+  const legend = node("legend");
+  field.append(legend);
   function labeled(labelText, control) {
     const label = node("label", labelText);
     label.append(control);
@@ -114,13 +124,20 @@ function addClassRow(row = {}) {
   day.name = "day";
   weekdays.forEach((name, index) => day.append(new Option(`${name}요일`, index)));
   day.value = row.day ?? 0;
+  const kind = node("select");
+  kind.name = "kind";
+  for (const [value, label] of Object.entries(kinds)) kind.append(new Option(label, value));
+  kind.value = row.kind ?? "class";
+  const showKind = () => { legend.textContent = kinds[kind.value]; };
+  kind.addEventListener("change", showKind);
+  showKind();
   const times = node("div", null, "class-times");
   times.append(input("start", "time", "시작"), input("end", "time", "종료"));
-  const remove = node("button", "수업 삭제", "secondary");
+  const remove = node("button", "삭제", "secondary");
   remove.type = "button";
   remove.addEventListener("click", () => field.remove());
-  field.append(labeled("요일", day), input("title", "text", "과목명", 120), times,
-    input("room", "text", "강의실 (선택)", 80), remove);
+  field.append(labeled("구분", kind), labeled("요일", day), input("title", "text", "이름", 120), times,
+    input("room", "text", "장소 (선택)", 80), remove);
   $("timetable-rows").append(field);
 }
 
@@ -174,7 +191,7 @@ function initializeTimetable() {
     setTimetableBusy(true);
     try {
       await api("/api/timetable", { classes });
-      status.textContent = `시간표 ${classes.length}개 수업을 저장했어요.`;
+      status.textContent = `수업 ${ofKind(classes, "class").length}개, 근로 ${ofKind(classes, "work").length}개를 저장했어요.`;
       await load();
     } catch (error) { status.textContent = error.message; }
     finally { setTimetableBusy(false); }
@@ -211,7 +228,7 @@ function initializeTimetable() {
       if (candidates.length) {
         $("timetable-rows").replaceChildren();
         candidates.forEach(addClassRow);
-        status.textContent = `${candidates.length}개 수업을 찾았어요. 원본과 비교해 과목, 요일, 시간을 확인하고 저장해 주세요.`;
+        status.textContent = `${candidates.length}개 칸을 찾았어요. 원본과 비교해 구분, 이름, 요일, 시간을 확인하고 저장해 주세요.`;
       } else {
         status.textContent = "수업 칸을 찾지 못했어요. 사진을 보면서 수업을 추가하거나 요일과 시간 눈금이 보이는 캡처를 올려 주세요.";
       }

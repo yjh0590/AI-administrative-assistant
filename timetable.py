@@ -29,17 +29,19 @@ def validate_classes(rows):
         day = row.get("day")
         title = row.get("title")
         room = row.get("room", "")
+        kind = row.get("kind", "class")
         start = time.fromisoformat(row["start"])
         end = time.fromisoformat(row["end"])
         if (
             type(day) is not int or not 0 <= day <= 6
             or not isinstance(title, str) or not 0 < len(title.strip()) <= 120
             or not isinstance(room, str) or len(room.strip()) > 80
+            or kind not in ("class", "work")
             or start.tzinfo or end.tzinfo or start.second or end.second
             or start.microsecond or end.microsecond or start >= end
         ):
             raise ValueError
-        classes.append({"day": day, "title": title.strip(), "room": room.strip(),
+        classes.append({"day": day, "kind": kind, "title": title.strip(), "room": room.strip(),
                         "start": start.isoformat(timespec="minutes"), "end": end.isoformat(timespec="minutes")})
     return sorted(classes, key=lambda row: (row["day"], row["start"], row["title"]))
 

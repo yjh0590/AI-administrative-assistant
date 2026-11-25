@@ -79,9 +79,26 @@ END:VCALENDAR
         ]
         articles = "".join(f"<item><title>{title}</title><link>https://example.test/{slug}</link></item>" for title, slug in rss_items)
         feed = feedparser.parse(f"<rss version='2.0'><channel><title>News</title>{articles}</channel></rss>")
-        with patch.dict(os.environ, {"NEWS_FEEDS": "https://example.test", "NEWS_INTERESTS": "AI"}), patch("sources.read_feed", return_value=feed):
+        with patch.dict(os.environ, {"NEWS_FEEDS": "https://example.test", "NEWS_INTERESTS": "AI", "NAVER_CLIENT_ID": ""}), patch("sources.read_feed", return_value=feed):
             result = news_items(self.now)
         self.assertEqual([entry["title"] for entry in result["items"]], ["New AI chips", "AI models improve", "AI policy review"])
+
+    def test_naver_news_search_uses_interests_without_rss(self):
+        fresh = self.now.strftime("%a, %d %b %Y %H:%M:%S +0900")
+        response = Mock()
+        response.json.return_value = {"items": [
+            {"title": "<b>AI</b> &quot;반도체&quot; 투자", "description": "설명", "pubDate": fresh,
+             "originallink": "https://press.test/1", "link": "https://n.news.naver.com/1"},
+            {"title": "<b>AI</b> 옛 기사", "description": "", "pubDate": "Mon, 01 Jan 2024 09:00:00 +0900",
+             "originallink": "https://press.test/2", "link": ""},
+        ]}
+        env = {"NEWS_FEEDS": "", "NEWS_INTERESTS": "AI", "NAVER_CLIENT_ID": "id", "NAVER_CLIENT_SECRET": "secret"}
+        with patch.dict(os.environ, env), patch("sources.requests.get", return_value=response) as get:
+            result = news_items(self.now)
+        self.assertEqual(get.call_args.kwargs["params"]["query"], "AI")
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["items"], [{"title": 'AI "반도체" 투자', "summary": "설명",
+                                            "url": "https://n.news.naver.com/1", "source": "네이버 뉴스"}])
 
     def test_news_summary_falls_back_when_model_output_is_invalid(self):
         item = {"title": "제목", "summary": "원문 발췌"}
@@ -163,10 +180,12 @@ class AssistantTest(unittest.TestCase):
             clock.now.return_value = self.due
             row = {"day": self.due.weekday(), "start": "09:00", "end": "10:30", "title": "행정학", "room": "101"}
             other_day = {**row, "day": (row["day"] + 1) % 7}
-            self.assertEqual(self.client.post("/api/timetable", json={"classes": [row, other_day]}).status_code, 200)
+            work = {**row, "kind": "work", "start": "13:00", "end": "17:00", "title": "도서관 근로", "room": ""}
+            self.assertEqual(self.client.post("/api/timetable", json={"classes": [row, other_day, work]}).status_code, 200)
             self.assertEqual(self.client.post("/api/timetable", json={"classes": [{**row, "end": "07:00"}]}).status_code, 400)
+            self.assertEqual(self.client.post("/api/timetable", json={"classes": [{**row, "kind": "club"}]}).status_code, 400)
             today = self.client.get("/api/briefing").json["school"]
-            self.assertEqual(len(today), 1)
+            self.assertEqual([item["kind"] for item in today], ["class", "work"])
             self.assertEqual(today[0]["start"], "2026-11-25T09:00:00+09:00")
             self.assertEqual(today[0]["title"], "행정학")
 

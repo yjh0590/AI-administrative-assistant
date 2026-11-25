@@ -6,6 +6,7 @@ import re
 import sqlite3
 from contextlib import closing
 from datetime import date, datetime, time, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -139,29 +140,66 @@ def read_feed(url):
     return feed
 
 
+def rss_entries(url):
+    feed = read_feed(url)
+    for entry in feed.entries[:40]:
+        published = entry.get("published_parsed") or entry.get("updated_parsed")
+        title = entry.get("title", "")
+        # Aggregators such as Google News name the publisher per item and append it to the title.
+        publisher = (entry.get("source") or {}).get("title", "")
+        if publisher and title.endswith(f" - {publisher}"):
+            title = title[: -len(publisher) - 3]
+        yield {"title": title, "summary": entry.get("summary", ""), "link": entry.get("link", ""),
+               "timestamp": calendar.timegm(published) if published else 0,
+               "source": publisher or feed.feed.get("title", "뉴스")}
+
+
+def naver_entries(term):
+    # NAVER API HUB news search: https://api.ncloud-docs.com/docs/naver-api-hub-search-news
+    response = requests.get(
+        "https://naverapihub.apigw.ntruss.com/search/v1/news",
+        params={"query": term, "display": 20, "sort": "date", "format": "json"},
+        headers={"X-NCP-APIGW-API-KEY-ID": os.getenv("NAVER_CLIENT_ID", "").strip(),
+                 "X-NCP-APIGW-API-KEY": os.getenv("NAVER_CLIENT_SECRET", "").strip()},
+        timeout=(5, 10),
+    )
+    response.raise_for_status()
+    for entry in response.json()["items"]:
+        try:
+            timestamp = parsedate_to_datetime(entry.get("pubDate", "")).timestamp()
+        except (TypeError, ValueError):
+            timestamp = 0
+        yield {"title": entry.get("title", ""), "summary": entry.get("description", ""),
+               "link": entry.get("link") or entry.get("originallink", ""), "timestamp": timestamp, "source": "네이버 뉴스"}
+
+
 def news_items(now):
-    urls = values("NEWS_FEEDS")
-    if not urls:
+    terms = values("NEWS_INTERESTS")
+    readers = [lambda url=url: list(rss_entries(url)) for url in values("NEWS_FEEDS")]
+    if os.getenv("NAVER_CLIENT_ID", "").strip() and os.getenv("NAVER_CLIENT_SECRET", "").strip():
+        readers += [lambda term=term: list(naver_entries(term)) for term in terms]
+    if not readers:
         return section("unconfigured")
-    interests = [term.casefold() for term in values("NEWS_INTERESTS")]
+    interests = [term.casefold() for term in terms]
     items = []
     successful = 0
-    for url in urls:
+    for read in readers:
         try:
-            feed = read_feed(url)
+            entries = read()
         except Exception as error:
-            LOG.warning("RSS feed unavailable (%s)", type(error).__name__)
+            LOG.warning("News source unavailable (%s)", type(error).__name__)
             continue
         successful += 1
-        source = FeedText(feed.feed.get("title", "뉴스")).text()[:100]
-        for entry in feed.entries[:40]:
-            title = FeedText(entry.get("title", "")).text()[:250]
-            detail = FeedText(entry.get("summary", "")).text()[:600]
-            link = entry.get("link", "")
+        for entry in entries:
+            source = FeedText(entry["source"]).text()[:100]
+            title = FeedText(entry["title"]).text()[:250]
+            detail = FeedText(entry["summary"]).text()[:600]
+            if detail.startswith(title):
+                detail = ""
+            link = entry["link"]
             if not title or not web_url(link):
                 continue
-            published = entry.get("published_parsed") or entry.get("updated_parsed")
-            timestamp = calendar.timegm(published) if published else 0
+            timestamp = entry["timestamp"]
             if timestamp and timestamp < (now - timedelta(days=3)).timestamp():
                 continue
             searchable = f"{title} {detail}".casefold()
@@ -181,7 +219,7 @@ def news_items(now):
         matches.append(item)
         if len(matches) == 3:
             break
-    status = "ok" if successful == len(urls) else "partial" if successful else "unavailable"
+    status = "ok" if successful == len(readers) else "partial" if successful else "unavailable"
     return section(status, matches)
 
 
@@ -252,7 +290,7 @@ def booking_items():
 def build_briefing(now):
     now = now.astimezone(SEOUL)
     agenda = optional_source("Naver Calendar", lambda: calendar_events(now.date()))
-    news = optional_source("RSS", lambda: news_items(now))
+    news = optional_source("News", lambda: news_items(now))
     bookings = optional_source("Kokkok", booking_items)
     summarize_news(news["items"])
     return {

@@ -1,0 +1,343 @@
+const $ = id => document.getElementById(id);
+const dateFormat = new Intl.DateTimeFormat("ko-KR", { dateStyle: "full", timeZone: "Asia/Seoul" });
+const timeFormat = new Intl.DateTimeFormat("ko-KR", { hour: "numeric", minute: "numeric", timeZone: "Asia/Seoul" });
+const clockFormat = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "Asia/Seoul" });
+const sourceLabels = {
+  agenda: ["네이버 캘린더", "오늘 등록된 일정이 없어요."],
+  news: ["관심 뉴스", "조건에 맞는 최근 기사가 없어요."],
+  bookings: ["콕콕 페이지 확인", "표시할 예약이 없어요."],
+};
+const featureTitles = {
+  briefing: "오늘의 브리핑",
+  agenda: "네이버 일정",
+  news: "관심 뉴스",
+  bookings: "콕콕 예약",
+  settings: "알림 설정",
+};
+const canSpeak = "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
+let digest;
+let speaking;
+let poll;
+let toastTimer;
+let serviceWorker;
+let device;
+let renderedContent;
+
+function updateClock() {
+  const clock = $("clock");
+  const time = clockFormat.format(new Date());
+  if (clock.dateTime === time) return;
+  clock.dateTime = time;
+  clock.textContent = time;
+}
+
+function connectionState(online) {
+  $("connection").hidden = false;
+  $("connection").dataset.online = String(online);
+  $("connection-label").textContent = online ? "서버 연결됨" : "서버 연결 끊김";
+}
+
+function message(content, keep = false) {
+  clearTimeout(toastTimer);
+  $("status").textContent = content;
+  $("status").hidden = !content;
+  if (content && !keep) toastTimer = setTimeout(() => { $("status").hidden = true; }, 5500);
+}
+
+async function api(path, data) {
+  const response = await fetch(path, data === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+  });
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    if (response.status === 401) showLogin();
+    throw new Error(result.error ?? "요청을 처리하지 못했어요. 다시 시도해 주세요.");
+  }
+  return response.json();
+}
+
+function showLogin() {
+  clearTimeout(poll);
+  if (canSpeak) speechSynthesis.cancel();
+  finishSpeaking();
+  digest = null;
+  renderedContent = null;
+  $("briefing").replaceChildren();
+  $("dashboard").hidden = true;
+  $("connection").hidden = true;
+  $("login").hidden = false;
+}
+
+function node(tag, content, className) {
+  const item = document.createElement(tag);
+  if (content) item.textContent = content;
+  if (className) item.className = className;
+  return item;
+}
+
+function eventLabel(item, date) {
+  if (item.all_day) return "종일";
+  const from = item.start.startsWith(date) ? timeFormat.format(new Date(item.start)) : "이전부터";
+  if (item.start === item.end) return from;
+  const to = item.end.startsWith(date) ? timeFormat.format(new Date(item.end)) : "다음 날까지";
+  return `${from} ~ ${to}`;
+}
+
+function sourceNotice(kind, content) {
+  const [label, empty] = sourceLabels[kind];
+  if (content.status === "unconfigured") return `${label} 연결이 필요해요.`;
+  if (content.status === "unavailable") return `${label} 정보를 가져오지 못했어요.`;
+  if (content.status === "partial") return `${label}의 일부 항목을 확인하지 못했어요.`;
+  return content.items.length ? "" : empty;
+}
+
+function menuStatus(kind) {
+  const content = digest?.[kind];
+  if (!content) return "브리핑 확인 대기";
+  if (content.status === "unconfigured") return "연결 필요";
+  if (content.status === "unavailable") return "확인 실패";
+  const units = { agenda: "일정", news: "기사", bookings: "확인 중인 페이지" };
+  const count = `${units[kind]} ${content.items.length}건`;
+  return content.status === "partial" ? `${count} · 일부 확인` : count;
+}
+
+function card(kind, includeHeading) {
+  const content = digest[kind];
+  const section = node("section", null, "card");
+  if (includeHeading) section.append(node("h2", sourceLabels[kind][0]));
+  const notice = sourceNotice(kind, content);
+  if (notice) section.append(node("p", notice, "muted"));
+  const list = node("ul");
+  for (const item of content.items) {
+    const row = node("li");
+    if (item.url) {
+      const link = node("a", item.title);
+      link.href = item.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      row.append(link);
+    } else row.append(node("strong", item.title));
+    if (kind === "agenda") row.append(node("span", eventLabel(item, digest.date), "detail"));
+    if (kind === "news") {
+      if (item.summary) row.append(node("p", item.summary));
+      row.append(node("span", item.source, "detail"));
+    }
+    if (kind === "bookings") {
+      const checked = item.checked ? ` · 확인 ${dateFormat.format(new Date(item.checked))} ${timeFormat.format(new Date(item.checked))}` : "";
+      row.append(node("span", item.status + checked, "detail"));
+    }
+    list.append(row);
+  }
+  if (list.childElementCount) section.append(list);
+  return section;
+}
+
+function renderView(navigated = false) {
+  if ($("dashboard").hidden) return;
+  const route = location.hash.slice(1);
+  const feature = Object.hasOwn(featureTitles, route) ? route : null;
+  const settings = feature === "settings";
+  const fullBriefing = feature === "briefing";
+  $("menu").hidden = Boolean(feature);
+  $("feature").hidden = !feature;
+  $("settings").hidden = !settings;
+  $("briefing-tools").hidden = !feature || settings;
+  $("briefing").hidden = !feature || settings;
+  $("listen").hidden = !fullBriefing;
+  $("feature-title").textContent = feature ? featureTitles[feature] : "";
+
+  if (!fullBriefing && speaking) {
+    speechSynthesis.cancel();
+    finishSpeaking();
+  }
+  if (feature && !settings) {
+    const contentKey = `${feature}:${digest?.generated ?? ""}`;
+    if (renderedContent !== contentKey) {
+      const sections = fullBriefing ? Object.keys(sourceLabels) : [feature];
+      const cards = digest ? sections.map(kind => card(kind, fullBriefing)) : [
+        node("p", "‘지금 확인’을 누르면 오늘 정보를 가져와요.", "card muted"),
+      ];
+      $("briefing").replaceChildren(...cards);
+      renderedContent = contentKey;
+    }
+  }
+  if (navigated) {
+    $(feature ? "feature-title" : "menu-title").focus({ preventScroll: true });
+    window.scrollTo(0, 0);
+  }
+}
+
+async function load() {
+  clearTimeout(poll);
+  const result = await api("/api/briefing");
+  digest = result.briefing;
+  $("login").hidden = true;
+  $("dashboard").hidden = false;
+  connectionState(true);
+  $("today").textContent = dateFormat.format(new Date(`${result.date}T00:00:00+09:00`));
+  const updated = digest ? ` · ${timeFormat.format(new Date(digest.generated))} 기준` : "";
+  $("schedule").textContent = `매일 ${result.schedule} 브리핑${updated}`;
+  $("menu-schedule").textContent = result.busy ? "브리핑을 만드는 중" : `매일 ${result.schedule} 브리핑`;
+  for (const kind of Object.keys(sourceLabels)) $(`${kind}-state`).textContent = menuStatus(kind);
+  $("refresh").disabled = result.busy;
+  $("refresh").textContent = result.busy ? "확인 중…" : "지금 확인";
+  $("listen").disabled = !digest || !canSpeak;
+  renderView();
+  if (result.failed) message("브리핑을 만들지 못했어요. 잠시 후 다시 확인해 주세요.");
+  const interval = result.busy ? 1200 : 30_000;
+  poll = setTimeout(pollBriefing, interval);
+}
+
+function pollBriefing() {
+  load().catch(error => {
+    if ($("dashboard").hidden) return;
+    connectionState(false);
+    message(error.message);
+    poll = setTimeout(pollBriefing, 30_000);
+  });
+}
+
+function spokenText(content) {
+  const agenda = content.agenda.items;
+  const parts = ["오늘의 브리핑입니다."];
+  if (agenda.length) parts.push(`일정 ${agenda.length}건입니다.`, ...agenda.map(item => `${eventLabel(item, content.date)}. ${item.title}.`));
+  if (content.news.items.length) parts.push("관심 뉴스입니다.", ...content.news.items.map(item => `${item.title}. ${item.summary}`));
+  if (content.bookings.items.length) parts.push("콕콕 예약 확인입니다.", ...content.bookings.items.map(item => `${item.title}. ${item.status}.`));
+  for (const key of Object.keys(sourceLabels)) {
+    const notice = sourceNotice(key, content[key]);
+    if (notice && content[key].status !== "unconfigured") parts.push(notice);
+  }
+  if (parts.length === 1) parts.push("캘린더나 뉴스 소스를 연결하면 브리핑할 내용을 가져옵니다.");
+  return parts.join(" ");
+}
+
+$("listen").addEventListener("click", () => {
+  if (speaking) {
+    speechSynthesis.cancel();
+    finishSpeaking();
+    return;
+  }
+  if (!digest) return;
+  const utterance = new SpeechSynthesisUtterance(spokenText(digest));
+  utterance.lang = "ko-KR";
+  const voice = speechSynthesis.getVoices().find(option => option.lang.toLowerCase().startsWith("ko"));
+  if (voice) utterance.voice = voice;
+  utterance.onend = () => { if (speaking === utterance) finishSpeaking(); };
+  utterance.onerror = event => {
+    if (speaking !== utterance) return;
+    finishSpeaking();
+    if (!["canceled", "interrupted"].includes(event.error)) message("음성을 재생하지 못했어요. 기기의 한국어 음성 설정을 확인해 주세요.");
+  };
+  speaking = utterance;
+  $("listen").textContent = "듣기 중지";
+  speechSynthesis.speak(utterance);
+});
+
+function finishSpeaking() {
+  speaking = null;
+  $("listen").textContent = "브리핑 듣기";
+}
+
+function showPush() {
+  $("push").disabled = !serviceWorker;
+  $("push").textContent = device ? "휴대폰 알림 끄기" : "휴대폰 알림 켜기";
+  $("push-test").disabled = !device;
+  $("settings-state").textContent = device ? "이 기기에서 받는 중" : "이 기기 알림 꺼짐";
+}
+
+async function startPush() {
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const standalone = navigator.standalone || matchMedia("(display-mode: standalone)").matches;
+  if (ios && !standalone) {
+    $("push-help").hidden = false;
+    $("push-help").textContent = "Safari 공유 메뉴에서 ‘홈 화면에 추가’를 선택한 뒤, 홈 화면의 AI 비서 아이콘을 열어 알림을 켜세요.";
+    return;
+  }
+  if (!(window.isSecureContext && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window)) {
+    $("push-help").hidden = false;
+    $("push-help").textContent = "HTTPS로 접속해 주세요. 아이폰은 Safari에서 홈 화면에 추가한 뒤 실행해야 해요.";
+    return;
+  }
+  try {
+    await navigator.serviceWorker.register("/sw.js");
+    serviceWorker = await navigator.serviceWorker.ready;
+    device = await serviceWorker.pushManager.getSubscription();
+    showPush();
+  } catch {
+    message("이 브라우저에서 알림을 준비하지 못했어요.");
+  }
+}
+
+$("push").addEventListener("click", async () => {
+  $("push").disabled = true;
+  try {
+    if (device) {
+      await api("/api/push/unsubscribe", { endpoint: device.endpoint });
+      await device.unsubscribe();
+      device = null;
+      message("이 기기에서 알림을 껐어요.");
+    } else {
+      if (await Notification.requestPermission() !== "granted") throw new Error("브라우저에서 알림을 허용해 주세요.");
+      const { key } = await api("/api/push/key");
+      const binary = key.replace(/-/g, "+").replace(/_/g, "/");
+      const raw = atob(binary.padEnd(Math.ceil(binary.length / 4) * 4, "="));
+      const newDevice = await serviceWorker.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: Uint8Array.from(raw, c => c.charCodeAt(0)) });
+      try {
+        await api("/api/push/subscribe", newDevice.toJSON());
+      } catch (error) {
+        await newDevice.unsubscribe();
+        throw error;
+      }
+      device = newDevice;
+      message("이 기기에 아침 브리핑 알림을 등록했어요.");
+    }
+  } catch (error) {
+    message(error.message);
+  } finally {
+    showPush();
+  }
+});
+
+$("push-test").addEventListener("click", async () => {
+  try {
+    await api("/api/push/test", { endpoint: device.endpoint });
+    message("테스트 알림을 보냈어요.");
+  } catch (error) { message(error.message); }
+});
+
+$("refresh").addEventListener("click", async () => {
+  $("refresh").disabled = true;
+  try {
+    await api("/api/briefing/refresh", {});
+    await load();
+  } catch (error) {
+    $("refresh").disabled = false;
+    message(error.message);
+  }
+});
+
+$("logout").addEventListener("click", async () => {
+  try {
+    await api("/api/logout", {});
+    history.replaceState(null, "", location.pathname);
+    showLogin();
+  }
+  catch (error) { message(error.message); }
+});
+
+$("login-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  const input = $("code");
+  try {
+    await api("/api/session", { code: input.value.trim() });
+    input.value = "";
+    message("");
+    await load();
+  } catch (error) { message(error.message); }
+});
+
+window.addEventListener("hashchange", () => renderView(true));
+updateClock();
+setInterval(updateClock, 1000);
+load().catch(error => { if ($("login").hidden) message(error.message); });
+startPush();

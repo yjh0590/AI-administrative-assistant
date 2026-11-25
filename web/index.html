@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0d0b1d">
+  <title>AI 비서</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header class="top">
+      <div class="brand"><span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span>AI 비서</span></div>
+      <span id="connection" class="connection" hidden><i aria-hidden="true"></i><span id="connection-label"></span></span>
+    </header>
+    <section id="login" class="hero login-panel" hidden>
+      <h1>내 브리핑 열기</h1>
+      <form id="login-form">
+        <label for="code">접속 코드</label>
+        <div class="actions"><input id="code" name="code" type="password" required autocomplete="current-password"><button>열기</button></div>
+      </form>
+    </section>
+    <div id="dashboard" hidden>
+      <section id="menu" aria-labelledby="menu-title">
+        <div class="hero command-panel">
+          <div class="command-copy">
+            <p class="date" id="today"></p>
+            <h1 id="menu-title" tabindex="-1">오늘의<br class="heading-break"> 브리핑</h1>
+            <p id="menu-schedule" class="briefing-schedule"></p>
+            <a class="primary-link" href="#briefing">브리핑 열기 <span aria-hidden="true">↗</span></a>
+          </div>
+          <div class="dial" role="group" aria-label="서울 현재 시각">
+            <div class="dial-track" aria-hidden="true"></div>
+            <div class="dial-arc" aria-hidden="true"></div>
+            <div class="dial-face">
+              <span class="dial-label">서울 · KST</span>
+              <time id="clock" class="clock" datetime="00:00:00">--:--</time>
+            </div>
+            <span class="dial-north" aria-hidden="true"></span>
+            <span class="dial-south" aria-hidden="true"></span>
+          </div>
+        </div>
+        <nav class="menu" aria-label="AI 비서 메뉴">
+          <a class="menu-link" href="#agenda"><span class="tool-icon calendar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>네이버 일정</strong><span class="tool-status" id="agenda-state">오늘 일정</span></a>
+          <a class="menu-link" href="#news"><span class="tool-icon news-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>관심 뉴스</strong><span class="tool-status" id="news-state">기사와 원문</span></a>
+          <a class="menu-link" href="#bookings"><span class="tool-icon radar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>콕콕 예약</strong><span class="tool-status" id="bookings-state">페이지 확인 상태</span></a>
+          <a class="menu-link" href="#settings"><span class="tool-icon bell-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>알림 설정</strong><span class="tool-status" id="settings-state">이 기기의 알림</span></a>
+        </nav>
+      </section>
+      <section id="feature" aria-labelledby="feature-title" hidden>
+        <a class="menu-back" href="#menu">‹ 메뉴로</a>
+        <div class="hero">
+          <h1 id="feature-title" tabindex="-1"></h1>
+          <div id="briefing-tools">
+            <p class="muted" id="schedule"></p>
+            <div class="actions">
+              <button id="listen" disabled>브리핑 듣기</button>
+              <button id="refresh" class="secondary">지금 확인</button>
+            </div>
+          </div>
+        </div>
+        <div id="briefing" class="cards" hidden></div>
+        <div id="settings" class="settings" hidden>
+          <div class="actions">
+            <button id="push" class="secondary" disabled>휴대폰 알림 켜기</button>
+            <button id="push-test" class="secondary" disabled>테스트 알림</button>
+            <button id="logout" class="secondary">로그아웃</button>
+          </div>
+          <p class="muted" id="push-help" hidden></p>
+        </div>
+      </section>
+    </div>
+    <p id="status" role="status" aria-live="polite" hidden></p>
+  </main>
+</body>
+</html>

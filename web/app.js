@@ -23,7 +23,7 @@ const featureTitles = {
   lms: "LMS 일정",
   news: "관심 뉴스",
   bookings: "콕콕 예약",
-  settings: "알림 설정",
+  settings: "알림·목소리 설정",
 };
 const canSpeak = "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
 let digest;
@@ -389,10 +389,7 @@ function toggleSpeech() {
     return;
   }
   if (!digest && !schoolToday && !lifeToday.length) return;
-  const utterance = new SpeechSynthesisUtterance(spokenText(digest));
-  utterance.lang = "ko-KR";
-  const voice = speechSynthesis.getVoices().find(option => option.lang.toLowerCase().startsWith("ko"));
-  if (voice) utterance.voice = voice;
+  const utterance = makeUtterance(spokenText(digest));
   utterance.onend = () => { if (speaking === utterance) finishSpeaking(); };
   utterance.onerror = event => {
     if (speaking !== utterance) return;
@@ -526,6 +523,7 @@ updateClock();
 initializeTimetable();
 initializeLife();
 initializeTalk();
+initializeVoice();
 setInterval(updateClock, 1000);
 load().catch(error => { if ($("login").hidden) message(error.message); });
 startPush();

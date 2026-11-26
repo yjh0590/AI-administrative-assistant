@@ -12,6 +12,7 @@
   <script src="/life.js" defer></script>
   <script src="/review.js" defer></script>
   <script src="/talk.js" defer></script>
+  <script src="/voice.js" defer></script>
   <script src="/calendar.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
@@ -75,7 +76,7 @@
           <a class="menu-link" href="#lms"><span class="tool-icon calendar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>LMS 일정</strong><span class="tool-status" id="lms-state">마감과 온라인 강의</span></a>
           <a class="menu-link" href="#news"><span class="tool-icon news-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>관심 뉴스</strong><span class="tool-status" id="news-state">기사와 원문</span></a>
           <a class="menu-link" href="#bookings"><span class="tool-icon radar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>콕콕 예약</strong><span class="tool-status" id="bookings-state">페이지 확인 상태</span></a>
-          <a class="menu-link" href="#settings"><span class="tool-icon bell-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>알림 설정</strong><span class="tool-status" id="settings-state">이 기기의 알림</span></a>
+          <a class="menu-link" href="#settings"><span class="tool-icon bell-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>알림·목소리</strong><span class="tool-status" id="settings-state">이 기기의 알림</span></a>
         </nav>
       </section>
       <section id="feature" aria-labelledby="feature-title" hidden>
@@ -147,6 +148,20 @@
             <button id="logout" class="secondary">로그아웃</button>
           </div>
           <p class="muted" id="push-help" hidden></p>
+          <section id="voice-settings" class="card voice-settings" aria-labelledby="voice-title">
+            <h2 id="voice-title">목소리</h2>
+            <p class="muted" id="voice-count"></p>
+            <label>여성형 카이온 목소리 <select id="voice-woman"></select></label>
+            <label>남성형 카이온 목소리 <select id="voice-man"></select></label>
+            <label>속도 <input id="voice-rate" type="range" min="0.7" max="1.4" step="0.05"></label>
+            <label>높이 <input id="voice-pitch" type="range" min="0.6" max="1.6" step="0.05"></label>
+            <div class="actions">
+              <button id="voice-test-woman" type="button">여성형 듣기</button>
+              <button id="voice-test-man" type="button">남성형 듣기</button>
+              <button id="voice-reset" class="secondary" type="button">기본값</button>
+            </div>
+            <p class="muted">아이폰은 <strong>설정 → 손쉬운 사용 → 읽기 및 말하기 → 음성 → 한국어</strong>에서 '향상된 음성'이나 '프리미엄' 음성을 내려받으면 훨씬 자연스러워요. 남자 목소리가 없으면 같은 화면에서 남성 한국어 음성이 있는지 찾아 내려받으세요. 시리 목소리는 애플이 웹앱에 열어 주지 않아 고를 수 없어요. 내려받은 뒤 카이온을 다시 열고 여기서 고르세요. 설정은 이 기기에만 저장돼요.</p>
+          </section>
         </div>
       </section>
     </div>

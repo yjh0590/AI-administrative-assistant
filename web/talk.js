@@ -20,10 +20,7 @@ function addBubble(text, who) {
 function speakReply(text) {
   if (!canSpeak) return;
   speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = "ko-KR";
-  const voice = speechSynthesis.getVoices().find(option => option.lang.toLowerCase().startsWith("ko"));
-  if (voice) utterance.voice = voice;
+  const utterance = makeUtterance(text);
   utterance.onend = utterance.onerror = () => { if (speaking === utterance) finishSpeaking(); };
   speaking = utterance;
   updateSpeechControls();

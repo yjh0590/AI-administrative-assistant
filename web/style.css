@@ -477,3 +477,30 @@ a { color: var(--accent); text-underline-offset: .2em; }
   .dial[data-state="ready"] .kaiyon-frame::after { opacity: .75; }
   .menu-link { transition: none; }
 }
+
+/* Calendar: day / week / month views. Kind colors are shared by list rows and month chips. */
+.cal-toolbar { display: grid; gap: 10px; }
+.cal-views, .cal-nav { display: flex; gap: 6px; }
+.cal-views button, .cal-nav button { flex: 1; padding: 8px 0; }
+.cal-title { margin: 0; text-align: center; font-size: 1.05rem; }
+.cal-list li { border-left: 3px solid var(--cal, #b08aee); padding-left: 10px; }
+.cal-class { --cal: #b08aee; }
+.cal-work { --cal: #4fc3b0; }
+.cal-routine { --cal: #7aa7ff; }
+.cal-lms { --cal: #ff7a85; }
+.cal-naver { --cal: #ffb35c; }
+.cal-chore { --cal: #8bd17c; }
+.cal-today { box-shadow: 0 0 0 1px #e6cbff99; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+.cal-head { text-align: center; font-size: .75rem; color: #c9bde6; padding: 4px 0; }
+.cal-cell {
+  display: flex; flex-direction: column; gap: 2px; align-items: stretch; min-height: 74px; min-width: 0;
+  padding: 4px 3px; border: 1px solid #b08aee33; border-radius: 8px; background: #19132e; color: inherit; text-align: left; cursor: pointer;
+}
+.cal-cell.cal-other { opacity: .45; }
+.cal-num { font-size: .8rem; font-weight: 700; }
+.cal-chip {
+  display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: .62rem; line-height: 1.35;
+  padding: 0 3px; border-radius: 4px; background: color-mix(in srgb, var(--cal) 28%, transparent); border-left: 2px solid var(--cal);
+}
+.cal-more { font-size: .6rem; color: #c9bde6; }

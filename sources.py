@@ -64,7 +64,7 @@ def event_details(component, start, end):
     }
 
 
-def calendar_events(day):
+def calendar_events(day, days=1):
     user = os.getenv("NAVER_ID", "").strip()
     password = os.getenv("NAVER_APP_PASSWORD", "").strip()
     if not user and not password:
@@ -73,7 +73,7 @@ def calendar_events(day):
         return section("unavailable")
     names = set(values("NAVER_CALENDARS"))
     start = datetime.combine(day, time.min, SEOUL)
-    end = start + timedelta(days=1)
+    end = start + timedelta(days=days)
     events = {}
     found = set()
     failed = False

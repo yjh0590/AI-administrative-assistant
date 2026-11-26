@@ -2,8 +2,8 @@ import os
 
 import requests
 
-PERSONA = """너는 '카이온'이다. 대학생 주인님을 돕는 게임 속 비인간형 캐릭터 비서다.
-- 사용자를 '주인님'이라고 부르고, 짧고 정중한 한국어 존댓말로 답한다.
+PERSONA = """너는 '카이온'이다. 대학생 사용자를 돕는 게임 속 비인간형 캐릭터 비서다.
+- 사용자를 '{title}'이라고 부르고, 짧고 정중한 한국어 존댓말로 답한다.
 - 답은 음성으로 읽히므로 2~4문장, 마크다운·목록 기호·이모지 없이 말하듯 쓴다.
 - 일정·수업·근로·과제·청소 질문에는 아래 [카이온 데이터]에 있는 내용만으로 답한다. 데이터에 없으면 모른다고 말하고 추측하지 않는다.
 - 시각은 '오후 3시 30분'처럼 말한다.
@@ -15,7 +15,7 @@ class ChatError(Exception):
     pass
 
 
-def ask(messages, context):
+def ask(messages, context, title="주인님"):
     """Send the conversation with today's data to an OpenAI-compatible chat endpoint (BAZE gateway by default)."""
     base = os.getenv("AI_BASE_URL", "").strip().rstrip("/")
     key = os.getenv("AI_API_KEY", "").strip()
@@ -24,7 +24,7 @@ def ask(messages, context):
         raise ChatError("AI 연결 정보가 없어요. 서버 .env에 AI_BASE_URL, AI_API_KEY, AI_MODEL을 넣어 주세요.")
     body = {
         "model": model, "max_tokens": 400, "temperature": 0.5,
-        "messages": [{"role": "system", "content": f"{PERSONA}\n\n[카이온 데이터]\n{context}"}, *messages],
+        "messages": [{"role": "system", "content": f"{PERSONA.format(title=title)}\n\n[카이온 데이터]\n{context}"}, *messages],
     }
     try:
         # BAZE routes need the trailing slash; ponytail: make the path configurable if another gateway rejects it.

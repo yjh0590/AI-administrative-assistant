@@ -12,6 +12,7 @@
   <script src="/life.js" defer></script>
   <script src="/review.js" defer></script>
   <script src="/talk.js" defer></script>
+  <script src="/calendar.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -33,7 +34,7 @@
           <div class="command-copy">
             <p class="date" id="today"></p>
             <h1 id="menu-title" tabindex="-1">오늘의<br class="heading-break"> 브리핑</h1>
-            <p id="kaiyon-greeting" class="kaiyon-greeting">주인님, 오늘 브리핑을 준비할까요?</p>
+            <p id="kaiyon-greeting" class="kaiyon-greeting">오늘 브리핑을 준비할까요?</p>
             <p id="menu-schedule" class="briefing-schedule"></p>
             <div class="actions command-actions">
               <a class="primary-link" href="#briefing">브리핑 열기 <span aria-hidden="true">↗</span></a>
@@ -68,6 +69,7 @@
         <nav class="menu" aria-label="AI 비서 메뉴">
           <a class="menu-link" href="#school"><span class="tool-icon calendar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>학교 시간표</strong><span class="tool-status" id="school-state">시간표 등록</span></a>
           <a class="menu-link" href="#life"><span class="tool-icon calendar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>생활 캘린더</strong><span class="tool-status" id="life-state">청소와 생활 일정</span></a>
+          <a class="menu-link" href="#calendar"><span class="tool-icon calendar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>캘린더</strong><span class="tool-status" id="calendar-state">일·주·월로 보기</span></a>
           <a class="menu-link" href="#review"><span class="tool-icon calendar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>주간 점검</strong><span class="tool-status" id="review-state">다음 주 미리보기</span></a>
           <a class="menu-link" href="#agenda"><span class="tool-icon calendar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>네이버 일정</strong><span class="tool-status" id="agenda-state">오늘 일정</span></a>
           <a class="menu-link" href="#lms"><span class="tool-icon calendar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>LMS 일정</strong><span class="tool-status" id="lms-state">마감과 온라인 강의</span></a>
@@ -100,6 +102,7 @@
         </details>
         <div id="briefing" class="cards" hidden></div>
         <div id="review" class="cards" hidden></div>
+        <div id="calendar-view" class="cards" hidden></div>
         <form id="timetable" class="card" hidden>
           <label for="timetable-photo">에브리타임 시간표 사진</label>
           <p class="muted">요일과 왼쪽 시간 눈금이 보이게 캡처하세요. 읽어온 내용을 확인하고 저장하면 매주 해당 요일에 표시돼요.</p>

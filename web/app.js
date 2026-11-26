@@ -18,6 +18,7 @@ const featureTitles = {
   school: "학교 시간표",
   life: "생활 캘린더",
   review: "주간 점검",
+  calendar: "캘린더",
   agenda: "네이버 일정",
   lms: "LMS 일정",
   news: "관심 뉴스",
@@ -32,6 +33,8 @@ let schoolWeek = null;
 let lifeToday = [];
 // Notices and video weeks uploaded by the LMS Chrome extension.
 let lmsSync = null;
+// How Kaiyon addresses the user (KAIYON_TITLE on the server).
+let callName = "주인님";
 let speaking;
 let poll;
 let toastTimer;
@@ -234,13 +237,16 @@ function renderView(navigated = false) {
   const school = feature === "school";
   const life = feature === "life";
   const review = feature === "review";
+  const cal = feature === "calendar";
   const fullBriefing = feature === "briefing";
   if (!feature && !$("kaiyon-portrait").hasAttribute("src")) choosePortrait();
   $("menu").hidden = Boolean(feature);
   $("feature").hidden = !feature;
   $("settings").hidden = !settings;
-  $("briefing-tools").hidden = !feature || settings || school || life || review;
-  $("briefing").hidden = !feature || settings || review;
+  $("briefing-tools").hidden = !feature || settings || school || life || review || cal;
+  $("briefing").hidden = !feature || settings || review || cal;
+  $("calendar-view").hidden = !cal;
+  if (cal) loadCalendar(navigated);
   $("review").hidden = !review;
   if (review) loadReview(navigated);
   $("timetable").hidden = !school;
@@ -259,7 +265,7 @@ function renderView(navigated = false) {
     speechSynthesis.cancel();
     finishSpeaking();
   }
-  if (feature && !settings && !review) {
+  if (feature && !settings && !review && !cal) {
     const contentKey = `${feature}:${digest?.generated ?? ""}:${JSON.stringify([schoolToday, schoolRoutines, schoolWeek, lifeToday, lmsSync])}`;
     if (renderedContent !== contentKey) {
       // Briefings saved before a source existed lack its key, so only render the ones present.
@@ -290,6 +296,7 @@ async function load() {
   schoolWeek = result.week ?? null;
   lifeToday = result.life ?? [];
   lmsSync = result.lms_sync ?? null;
+  callName = result.title || callName;
   setBriefingActivity(result.busy, Boolean(completed));
   $("login").hidden = true;
   $("dashboard").hidden = false;
@@ -299,9 +306,9 @@ async function load() {
   $("schedule").textContent = `매일 ${result.schedule} 브리핑${updated}`;
   $("menu-schedule").textContent = result.busy ? "브리핑을 만드는 중" : `매일 ${result.schedule} 브리핑`;
   const greeting = $("kaiyon-greeting");
-  if (result.busy) greeting.textContent = "주인님, 지금 자료를 확인 중입니다.";
-  else if (digest || schoolToday) greeting.textContent = "주인님, 오늘 브리핑을 준비했습니다.";
-  else greeting.textContent = "주인님, 오늘 브리핑을 준비할까요?";
+  if (result.busy) greeting.textContent = `${callName}, 지금 자료를 확인 중입니다.`;
+  else if (digest || schoolToday) greeting.textContent = `${callName}, 오늘 브리핑을 준비했습니다.`;
+  else greeting.textContent = `${callName}, 오늘 브리핑을 준비할까요?`;
   for (const kind of Object.keys(sourceLabels)) $(`${kind}-state`).textContent = menuStatus(kind);
   const work = ofKind(schoolToday, "work").length;
   $("school-state").textContent = schoolToday
@@ -327,7 +334,7 @@ function pollBriefing() {
 
 function spokenText(content) {
   const agenda = content?.agenda.items ?? [];
-  const parts = ["주인님, 오늘의 브리핑입니다."];
+  const parts = [`${callName}, 오늘의 브리핑입니다.`];
   if (schoolToday) {
     if (schoolWeek) parts.push(`오늘은 ${schoolWeek}주차입니다.`);
     const lessons = ofKind(schoolToday, "class");

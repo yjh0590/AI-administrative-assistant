@@ -9,7 +9,7 @@ import sqlite3
 import subprocess
 import threading
 from contextlib import closing, contextmanager
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from functools import wraps
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -26,6 +26,7 @@ from sources import SEOUL, build_briefing
 from life import DEFAULT_ITEMS, life_today, validate_items
 from chat import ChatError, ask, build_context, validate_messages
 from lms_sync import sync_today, validate_sync
+from planner import calendar_range
 from review import week_review
 from timetable import read_photo, school_today, stored, validate_timetable
 
@@ -236,6 +237,11 @@ class Assistant:
             threading.Event().wait(20)
 
 
+def title():
+    # How Kaiyon addresses the user; kept in .env so a real name stays out of the code.
+    return os.getenv("KAIYON_TITLE", "").strip()[:20] or "주인님"
+
+
 def create_app(assistant, code, origin="", remote=""):
     mimetypes.add_type("image/webp", ".webp")
     app = Flask(__name__, static_folder=str(ROOT / "web"), static_url_path="")
@@ -310,7 +316,7 @@ def create_app(assistant, code, origin="", remote=""):
         school = school_today(timetable, now) if timetable else {"week": None, "classes": None, "routines": []}
         return jsonify(
             date=today, briefing=assistant.briefing(today), schedule=assistant.briefing_time.strftime("%H:%M"),
-            busy=busy, failed=assistant.generation_failed,
+            busy=busy, failed=assistant.generation_failed, title=title(),
             school=school["classes"], routines=school["routines"], week=school["week"],
             life=life_today(assistant.life(), now.date()), lms_sync=sync_today(assistant.lms_sync(), now.date()),
         )
@@ -348,11 +354,24 @@ def create_app(assistant, code, origin="", remote=""):
                 school_today(timetable, now) if timetable else None, life_today(life, now.date()),
                 sync_today(assistant.lms_sync(), now.date()), week_review(timetable, life, now.date() + timedelta(days=1)),
             )
-            return jsonify(reply=ask(messages, context))
+            return jsonify(reply=ask(messages, context, title()))
         except ChatError as error:
             return jsonify(error=str(error)), 503
         finally:
             assistant.chat_lock.release()
+
+    @app.get("/api/calendar")
+    @require_login
+    def calendar_view():
+        try:
+            first = date.fromisoformat(request.args.get("start", ""))
+            days = int(request.args.get("days", "7"))
+        except ValueError:
+            return jsonify(error="날짜를 확인해 주세요."), 400
+        if not 1 <= days <= 42:
+            return jsonify(error="한 번에 42일까지 볼 수 있어요."), 400
+        with_naver = request.args.get("naver", "1") != "0"
+        return jsonify(calendar_range(assistant.timetable(), assistant.life(), first, days, with_naver))
 
     @app.get("/api/review")
     @require_login

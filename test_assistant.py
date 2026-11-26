@@ -323,7 +323,7 @@ class AssistantTest(unittest.TestCase):
         weekday = self.due.weekday()
         self.assistant.save_timetable({"start": "2026-09-01", "last": "", "routines": [], "classes": [
             {"kind": "class", "day": weekday, "date": "", "start": "15:00", "end": "17:45", "title": "행정법", "room": "13-208"}]})
-        env = {"AI_BASE_URL": "https://ai.example.test/v1/gateway", "AI_API_KEY": "k", "AI_MODEL": "claude-haiku-5-5", "LMS_ICAL_URL": ""}
+        env = {"AI_BASE_URL": "https://ai.example.test/v1/gateway", "AI_API_KEY": "k", "AI_MODEL": "claude-haiku-5-5", "LMS_ICAL_URL": "", "KAIYON_TITLE": "정현님"}
         ok = Mock(ok=True, status_code=200, text="", json=Mock(return_value={"choices": [{"message": {"content": "주인님, 오늘은 행정법이 있습니다."}}]}))
         question = {"messages": [{"role": "user", "content": "오늘 수업 뭐야?"}]}
         with patch.dict(os.environ, env), patch("app.datetime") as clock, patch("chat.requests.post", return_value=ok) as post:
@@ -338,6 +338,24 @@ class AssistantTest(unittest.TestCase):
         self.assertEqual(post.call_args_list[0].args[0], "https://ai.example.test/v1/gateway/chat/completions/")
         self.assertEqual((body["model"], body["messages"][-1]), ("claude-haiku-5-5", {"role": "user", "content": "오늘 수업 뭐야?"}))
         self.assertIn("오늘 수업: 행정법 15:00~17:45 13-208", body["messages"][0]["content"])
+        self.assertIn("'정현님'이라고 부르고", body["messages"][0]["content"])
+
+    def test_calendar_groups_every_source_by_date(self):
+        self.client.post("/api/session", json={"code": "test-very-long-access-code"})
+        self.assistant.save_timetable({"start": "2026-09-01", "last": "", "routines": [], "classes": [
+            {"kind": "class", "day": 0, "date": "", "start": "15:00", "end": "17:45", "title": "형사법", "room": ""},
+            {"kind": "work", "day": 1, "date": "2026-12-01", "start": "13:00", "end": "16:00", "title": "근로", "room": ""}]})
+        trip = {"title": "고향 방문", "start": "2026-11-30T00:00:00+09:00", "end": "2026-12-02T00:00:00+09:00", "all_day": True}
+        with patch.dict(os.environ, {"LMS_ICAL_URL": ""}), patch("planner.calendar_events", return_value=section("ok", [trip])) as naver:
+            days = self.client.get("/api/calendar?start=2026-11-30&days=7").json["days"]
+            self.assertEqual(self.client.get("/api/calendar?start=2026-11-30&days=43").status_code, 400)
+            self.assertEqual(self.client.get("/api/calendar?start=nope").status_code, 400)
+        naver.assert_called_once()
+        self.assertEqual([day["date"] for day in days][::6], ["2026-11-30", "2026-12-06"])
+        self.assertEqual(([c["title"] for c in days[0]["classes"]], [c["title"] for c in days[1]["classes"]]), (["형사법"], ["근로"]))
+        self.assertEqual([bool(day["naver"]) for day in days[:3]], [True, True, False])
+        self.assertIn("가스레인지·인덕션, 싱크대, 주방 바닥 닦기", [item["title"] for item in days[0]["chores"]])
+        self.assertEqual(days[0]["habits"], 7)
 
     def test_kaiyon_portraits_are_served_as_webp(self):
         for variant in ("woman", "man"):

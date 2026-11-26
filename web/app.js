@@ -154,10 +154,9 @@ const lmsLabel = item => [item.course, item.kind === "due" ? `마감 ${lmsWhen(i
   .filter(Boolean).join(" · ");
 
 function syncNodes() {
-  const nodes = [];
-  if (lmsSync.stale) {
-    nodes.push(node("p", `LMS 공지 동기화가 오래됐어요. 마지막 동기화 ${lmsWhen(lmsSync.synced)}. PC 크롬 확장프로그램에서 다시 보내 주세요.`, "muted"));
-  }
+  // Notices only refresh when the PC's Chrome extension sends them, so always say how fresh they are.
+  const basis = `공지 기준: ${lmsWhen(lmsSync.synced)}`;
+  const nodes = [node("p", lmsSync.stale ? `${basis} · 2일 넘게 동기화되지 않았어요. PC에서 크롬을 켜면 자동으로 보내요.` : basis, "muted")];
   if (lmsSync.notices.length) {
     const list = node("ul");
     for (const notice of lmsSync.notices) {

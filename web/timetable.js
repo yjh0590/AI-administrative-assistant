@@ -151,21 +151,25 @@ function addClassRow(row = {}) {
   kind.value = row.kind ?? "class";
   const times = node("div", null, "class-times");
   times.append(input("start", "time", "시작"), input("end", "time", "종료"));
-  // Online classes have no fixed slot, so they skip day and time.
+  const dateLabel = input("date", "date", "특정 날짜 (선택, 넣으면 그날만)");
+  const dated = dateLabel.querySelector("input");
+  // Online classes have no fixed slot, so they skip day and time. Dated rows take their weekday from the date.
   const showKind = () => {
     const online = kind.value === "online";
     legend.textContent = kinds[kind.value];
-    dayLabel.hidden = times.hidden = online;
+    dateLabel.hidden = times.hidden = online;
+    dayLabel.hidden = online || Boolean(dated.value);
     for (const control of times.querySelectorAll("input")) control.required = !online;
   };
   kind.addEventListener("change", showKind);
+  dated.addEventListener("input", showKind);
   showKind();
   const offWeeks = input("off_weeks", "text", "쉬는 주차 (선택, 예: 8, 15)", 120);
   offWeeks.querySelector("input").value = (row.off_weeks ?? []).join(", ");
   const remove = node("button", "삭제", "secondary");
   remove.type = "button";
   remove.addEventListener("click", () => field.remove());
-  field.append(labeled("구분", kind), dayLabel, input("title", "text", "이름", 120), times,
+  field.append(labeled("구분", kind), dateLabel, dayLabel, input("title", "text", "이름", 120), times,
     input("room", "text", "장소 (선택)", 80), offWeeks, remove);
   $("timetable-rows").append(field);
 }
@@ -236,9 +240,10 @@ async function loadTimetableEditor() {
   form.dataset.loaded = ticket;
   setTimetableBusy(true);
   try {
-    const { start, classes, routines } = await api("/api/timetable");
+    const { start, last, classes, routines } = await api("/api/timetable");
     if (form.dataset.loaded !== ticket) return;
     $("timetable-start").value = start;
+    $("timetable-last").value = last ?? "";
     classes.forEach(addClassRow);
     routines.forEach(addRoutineRow);
     $("timetable-status").textContent = "";
@@ -268,7 +273,9 @@ function initializeTimetable() {
     const classes = [...$("timetable-rows").children].map(field => {
       const value = name => field.querySelector(`[name="${name}"]`).value;
       const row = { kind: value("kind"), title: value("title"), room: value("room"), off_weeks: weekList(value("off_weeks")) };
-      if (row.kind !== "online") Object.assign(row, { day: Number(value("day")), start: value("start"), end: value("end") });
+      if (row.kind !== "online") {
+        Object.assign(row, { day: Number(value("day")), date: value("date"), start: value("start"), end: value("end") });
+      }
       return row;
     });
     const routines = [...$("routine-rows").children].map(field => ({
@@ -279,7 +286,7 @@ function initializeTimetable() {
     }));
     setTimetableBusy(true);
     try {
-      await api("/api/timetable", { start: $("timetable-start").value, classes, routines });
+      await api("/api/timetable", { start: $("timetable-start").value, last: $("timetable-last").value, classes, routines });
       status.textContent = `${Object.entries(kinds).map(([kind, label]) => `${label} ${ofKind(classes, kind).length}개`)
         .join(", ")}, 일상 규칙 ${routines.length}개를 저장했어요.`;
       await load();

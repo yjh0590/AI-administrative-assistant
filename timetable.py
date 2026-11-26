@@ -49,15 +49,17 @@ def validate_classes(rows):
         if kind not in ("class", "work", "online"):
             raise ValueError
         item = {"kind": kind, "title": text(row.get("title"), 120), "room": text(row.get("room", ""), 80, False),
-                "off_weeks": weeks(row.get("off_weeks", [])), "day": None, "start": "", "end": ""}
+                "off_weeks": weeks(row.get("off_weeks", [])), "day": None, "date": "", "start": "", "end": ""}
         if kind != "online":
-            day = row.get("day")
+            # A dated row happens once on that date (monthly work rosters); otherwise it repeats weekly.
+            item["date"] = iso_day(row.get("date", ""))
+            day = date.fromisoformat(item["date"]).weekday() if item["date"] else row.get("day")
             start, end = clock(row["start"]), clock(row["end"])
             if type(day) is not int or not 0 <= day <= 6 or start >= end:
                 raise ValueError
             item.update(day=day, start=start.isoformat(timespec="minutes"), end=end.isoformat(timespec="minutes"))
         classes.append(item)
-    return sorted(classes, key=lambda row: (7 if row["day"] is None else row["day"], row["start"], row["title"]))
+    return sorted(classes, key=lambda row: (row["date"], 7 if row["day"] is None else row["day"], row["start"], row["title"]))
 
 
 def validate_routines(rows, titles):
@@ -79,12 +81,18 @@ def validate_routines(rows, titles):
     return routines
 
 
+def iso_day(value):
+    if not isinstance(value, str) or (value and date.fromisoformat(value).isoformat() != value):
+        raise ValueError
+    return value
+
+
 def validate_timetable(body):
-    start = body.get("start", "")
-    if not isinstance(start, str) or (start and date.fromisoformat(start).isoformat() != start):
+    start, last = iso_day(body.get("start", "")), iso_day(body.get("last", ""))
+    if start and last and last < start:
         raise ValueError
     classes = validate_classes(body.get("classes"))
-    return {"start": start, "classes": classes,
+    return {"start": start, "last": last, "classes": classes,
             "routines": validate_routines(body.get("routines", []), {row["title"] for row in classes})}
 
 
@@ -102,7 +110,12 @@ def week_of(start, day):
 
 def school_today(timetable, now):
     week = week_of(timetable["start"], now.date())
-    off = {row["title"] for row in timetable["classes"] if week in row.get("off_weeks", [])}
+    # After the last class day the term is over: lessons stop, but work shifts may continue.
+    ended = bool(timetable.get("last")) and now.date().isoformat() > timetable["last"]
+    if ended:
+        week = None
+    off = {row["title"] for row in timetable["classes"]
+           if week in row.get("off_weeks", []) or (ended and row.get("kind") != "work")}
     classes = [
         {**row, **{
             field: datetime.combine(now.date(), time.fromisoformat(row[field]), now.tzinfo).isoformat()
@@ -110,10 +123,12 @@ def school_today(timetable, now):
         }}
         for row in timetable["classes"]
         if row.get("kind") != "online" and row["day"] == now.weekday() and week not in row.get("off_weeks", [])
+        and row.get("date", "") in ("", now.date().isoformat())
+        and not (ended and row.get("kind") != "work")
     ]
     routines = sorted(
         (row for row in timetable["routines"]
          if (not row["days"] or now.weekday() in row["days"]) and row["course"] not in off),
         key=lambda row: (row["time"] or "99", row["title"]),
     )
-    return {"week": week, "classes": classes, "routines": routines}
+    return {"week": week, "classes": sorted(classes, key=lambda row: row["start"]), "routines": routines}

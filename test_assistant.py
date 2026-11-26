@@ -176,7 +176,7 @@ class AssistantTest(unittest.TestCase):
             self.assertEqual(blocked.status_code, 403)
             self.assertEqual(self.client.post("/api/timetable/photo", **photo).json["text"], "행정학")
             recognize.assert_called_once_with(photo["data"])
-        self.assertEqual(self.client.get("/api/timetable").json, {"start": "", "classes": [], "routines": []})
+        self.assertEqual(self.client.get("/api/timetable").json, {"start": "", "last": "", "classes": [], "routines": []})
         with patch("app.datetime") as clock:
             clock.now.return_value = self.due
             row = {"day": self.due.weekday(), "start": "09:00", "end": "10:30", "title": "행정학", "room": "101"}
@@ -217,6 +217,17 @@ class AssistantTest(unittest.TestCase):
         self.assertEqual(result["week"], 13)
         self.assertEqual([item["title"] for item in result["school"]], ["형사법"])
         self.assertEqual([item["title"] for item in result["routines"]], ["온라인 경제 듣기"])
+        # After the last class day only work shifts and unlinked rules remain. Dated rows happen only on that date.
+        work = {"kind": "work", "date": "2026-11-25", "start": "15:00", "end": "17:00", "title": "근로"}
+        other = {**work, "date": "2026-12-02", "title": "다음 주 근로"}
+        ended = {**timetable, "last": "2026-11-24", "classes": [*timetable["classes"], work, other]}
+        with patch("app.datetime") as clock:
+            clock.now.return_value = self.due
+            self.assertEqual(self.client.post("/api/timetable", json=ended).status_code, 200)
+            self.assertEqual(self.client.post("/api/timetable", json={**ended, "last": "2026-08-01"}).status_code, 400)
+            result = self.client.get("/api/briefing").json
+        self.assertEqual((result["week"], [item["title"] for item in result["school"]]), (None, ["근로"]))
+        self.assertEqual(result["routines"], [])
 
     def test_life_calendar_picks_chores_due_today(self):
         self.assertEqual(validate_items(DEFAULT_ITEMS), DEFAULT_ITEMS)

@@ -300,7 +300,7 @@ def create_app(assistant, code, origin=""):
     @app.get("/api/timetable")
     @require_login
     def get_timetable():
-        return jsonify(assistant.timetable() or {"start": "", "classes": [], "routines": []})
+        return jsonify(assistant.timetable() or {"start": "", "last": "", "classes": [], "routines": []})
 
     @app.post("/api/timetable")
     @require_login

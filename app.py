@@ -22,7 +22,8 @@ from pywebpush import WebPushException, webpush
 from waitress import serve
 
 from sources import SEOUL, build_briefing
-from timetable import classes_today, read_photo, validate_classes
+from life import DEFAULT_ITEMS, life_today, validate_items
+from timetable import read_photo, school_today, stored, validate_timetable
 
 ROOT = Path(__file__).resolve().parent
 LOG = logging.getLogger(__name__)
@@ -75,6 +76,7 @@ class Assistant:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS briefings (day TEXT PRIMARY KEY, content TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS timetable (id INTEGER PRIMARY KEY CHECK (id = 1), content TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS life (id INTEGER PRIMARY KEY CHECK (id = 1), content TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS devices (endpoint TEXT PRIMARY KEY, subscription TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS deliveries (
                     day TEXT NOT NULL, endpoint TEXT NOT NULL REFERENCES devices(endpoint) ON DELETE CASCADE,
@@ -94,14 +96,23 @@ class Assistant:
             row = db.execute("SELECT content FROM briefings WHERE day = ?", (day,)).fetchone()
         return json.loads(row[0]) if row else None
 
+    def life(self):
+        with self.db() as db:
+            row = db.execute("SELECT content FROM life WHERE id = 1").fetchone()
+        return json.loads(row[0]) if row else DEFAULT_ITEMS
+
+    def save_life(self, items):
+        with self.db() as db:
+            db.execute("INSERT OR REPLACE INTO life VALUES (1, ?)", (json.dumps(items, ensure_ascii=False),))
+
     def timetable(self):
         with self.db() as db:
             row = db.execute("SELECT content FROM timetable WHERE id = 1").fetchone()
-        return json.loads(row[0]) if row else []
+        return stored(json.loads(row[0])) if row else None
 
-    def save_timetable(self, rows):
+    def save_timetable(self, timetable):
         with self.db() as db:
-            db.execute("INSERT OR REPLACE INTO timetable VALUES (1, ?)", (json.dumps(rows, ensure_ascii=False),))
+            db.execute("INSERT OR REPLACE INTO timetable VALUES (1, ?)", (json.dumps(timetable, ensure_ascii=False),))
 
     def refresh(self, now, background=False):
         if not self.generation_lock.acquire(blocking=False):
@@ -262,26 +273,45 @@ def create_app(assistant, code, origin=""):
         today = now.date().isoformat()
         busy = assistant.generation_lock.locked()
         timetable = assistant.timetable()
+        school = school_today(timetable, now) if timetable else {"week": None, "classes": None, "routines": []}
         return jsonify(
             date=today, briefing=assistant.briefing(today), schedule=assistant.briefing_time.strftime("%H:%M"),
-            busy=busy, failed=assistant.generation_failed, school=classes_today(timetable, now) if timetable else None,
+            busy=busy, failed=assistant.generation_failed,
+            school=school["classes"], routines=school["routines"], week=school["week"],
+            life=life_today(assistant.life(), now.date()),
         )
+
+    @app.get("/api/life")
+    @require_login
+    def get_life():
+        return jsonify(items=assistant.life())
+
+    @app.post("/api/life")
+    @require_login
+    def save_life():
+        request.max_content_length = 64 * 1024
+        try:
+            items = validate_items(json_object().get("items"))
+        except (TypeError, ValueError):
+            return jsonify(error="카테고리, 할 일과 반복 요일·날짜를 확인해 주세요."), 400
+        assistant.save_life(items)
+        return jsonify(items=items)
 
     @app.get("/api/timetable")
     @require_login
     def get_timetable():
-        return jsonify(classes=assistant.timetable())
+        return jsonify(assistant.timetable() or {"start": "", "classes": [], "routines": []})
 
     @app.post("/api/timetable")
     @require_login
     def save_timetable():
         request.max_content_length = 64 * 1024
         try:
-            rows = validate_classes(json_object().get("classes"))
+            timetable = validate_timetable(json_object())
         except (KeyError, TypeError, ValueError):
-            return jsonify(error="과목, 요일, 시작·종료 시간을 확인해 주세요."), 400
-        assistant.save_timetable(rows)
-        return jsonify(classes=rows)
+            return jsonify(error="개강일, 과목, 요일, 시간, 주차와 규칙 내용을 확인해 주세요."), 400
+        assistant.save_timetable(timetable)
+        return jsonify(timetable)
 
     @app.post("/api/timetable/photo")
     @require_login

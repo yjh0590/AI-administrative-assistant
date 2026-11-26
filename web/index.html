@@ -9,6 +9,7 @@
   <link rel="apple-touch-icon" href="/icon-192.png">
   <link rel="stylesheet" href="/style.css">
   <script src="/timetable.js" defer></script>
+  <script src="/life.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -53,6 +54,7 @@
         </div>
         <nav class="menu" aria-label="AI 비서 메뉴">
           <a class="menu-link" href="#school"><span class="tool-icon calendar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>학교 시간표</strong><span class="tool-status" id="school-state">시간표 등록</span></a>
+          <a class="menu-link" href="#life"><span class="tool-icon calendar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>생활 캘린더</strong><span class="tool-status" id="life-state">청소와 생활 일정</span></a>
           <a class="menu-link" href="#agenda"><span class="tool-icon calendar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>네이버 일정</strong><span class="tool-status" id="agenda-state">오늘 일정</span></a>
           <a class="menu-link" href="#news"><span class="tool-icon news-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>관심 뉴스</strong><span class="tool-status" id="news-state">기사와 원문</span></a>
           <a class="menu-link" href="#bookings"><span class="tool-icon radar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>콕콕 예약</strong><span class="tool-status" id="bookings-state">페이지 확인 상태</span></a>
@@ -89,11 +91,33 @@
           <p id="timetable-status" class="muted" role="status"></p>
           <canvas id="timetable-preview" hidden aria-label="첨부한 시간표 사진"></canvas>
           <details id="timetable-text" hidden><summary>사진에서 읽은 글자</summary><p></p></details>
+          <h3>시간표 규칙</h3>
+          <p class="muted">시간이 정해지지 않은 강의는 구분을 <strong>온라인 수업</strong>으로 고르세요. 수업이 없는 주차는 <strong>쉬는 주차</strong>에 적으면, 개강일로 주차를 계산해 그 주에는 브리핑에서 빼요.</p>
+          <label>개강일 <input id="timetable-start" type="date"></label>
           <div id="timetable-rows"></div>
           <div class="actions">
             <button id="timetable-add" type="button" class="secondary">항목 추가</button>
+          </div>
+          <h3>일상 규칙</h3>
+          <p class="muted">무엇을 언제 할지 정해 두면 그 요일 브리핑의 <strong>오늘 할 일</strong>에 나와요.</p>
+          <div id="routine-rows"></div>
+          <div class="actions">
+            <button id="routine-add" type="button" class="secondary">규칙 추가</button>
             <button type="submit">시간표 저장</button>
           </div>
+        </form>
+        <form id="life" class="card" hidden>
+          <details>
+            <summary>생활 일정 편집</summary>
+            <p class="muted">반복에 맞춰 그날 할 일을 브리핑에서 알려 줘요. 매일 하는 습관은 접어서 보여 주고, 음성으로는 읽지 않아요. 격주 일정은 짝수 주에 알려 줘요.</p>
+            <datalist id="life-categories"><option value="청소"><option value="분리수거"><option value="장보기"><option value="공과금"></datalist>
+            <div id="life-rows"></div>
+            <div class="actions">
+              <button id="life-add" type="button" class="secondary">일정 추가</button>
+              <button type="submit">생활 일정 저장</button>
+            </div>
+          </details>
+          <p id="life-status" class="muted" role="status"></p>
         </form>
         <div id="settings" class="settings" hidden>
           <div class="actions">

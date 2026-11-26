@@ -11,6 +11,7 @@ import feedparser
 from icalendar import Calendar
 
 from app import Assistant, create_app
+from life import DEFAULT_ITEMS, life_today, validate_items
 from sources import SEOUL, booking_items, build_briefing, calendar_events, news_items, section, summarize_news
 
 
@@ -175,7 +176,7 @@ class AssistantTest(unittest.TestCase):
             self.assertEqual(blocked.status_code, 403)
             self.assertEqual(self.client.post("/api/timetable/photo", **photo).json["text"], "행정학")
             recognize.assert_called_once_with(photo["data"])
-        self.assertEqual(self.client.get("/api/timetable").json, {"classes": []})
+        self.assertEqual(self.client.get("/api/timetable").json, {"start": "", "classes": [], "routines": []})
         with patch("app.datetime") as clock:
             clock.now.return_value = self.due
             row = {"day": self.due.weekday(), "start": "09:00", "end": "10:30", "title": "행정학", "room": "101"}
@@ -188,6 +189,54 @@ class AssistantTest(unittest.TestCase):
             self.assertEqual([item["kind"] for item in today], ["class", "work"])
             self.assertEqual(today[0]["start"], "2026-11-25T09:00:00+09:00")
             self.assertEqual(today[0]["title"], "행정학")
+
+    def test_timetable_rules_skip_off_weeks_and_report_routines(self):
+        self.client.post("/api/session", json={"code": "test-very-long-access-code"})
+        weekday = self.due.weekday()
+        # Timetables saved before rules existed were a bare list.
+        self.assistant.save_timetable([{"day": weekday, "kind": "class", "title": "행정학", "room": "",
+                                        "start": "09:00", "end": "10:30"}])
+        with patch("app.datetime") as clock:
+            clock.now.return_value = self.due
+            self.assertEqual(self.client.get("/api/briefing").json["school"][0]["title"], "행정학")
+            # 2026-09-01 starts week 1, so 2026-11-25 is week 13.
+            timetable = {"start": "2026-09-01", "classes": [
+                {"day": weekday, "start": "09:00", "end": "10:30", "title": "행정학", "off_weeks": [13]},
+                {"day": weekday, "start": "13:00", "end": "14:00", "title": "형사법", "off_weeks": [8]},
+                {"kind": "online", "title": "영화와 다문화", "off_weeks": [13]},
+                {"kind": "online", "title": "온라인 경제"},
+            ], "routines": [
+                {"title": "영화와 다문화 듣기", "days": [weekday], "time": "20:00", "course": "영화와 다문화"},
+                {"title": "온라인 경제 듣기", "days": [], "time": "", "course": "온라인 경제"},
+                {"title": "다른 날 할 일", "days": [(weekday + 1) % 7]},
+            ]}
+            self.assertEqual(self.client.post("/api/timetable", json=timetable).status_code, 200)
+            bad = {**timetable, "routines": [{"title": "듣기", "course": "없는 과목"}]}
+            self.assertEqual(self.client.post("/api/timetable", json=bad).status_code, 400)
+            result = self.client.get("/api/briefing").json
+        self.assertEqual(result["week"], 13)
+        self.assertEqual([item["title"] for item in result["school"]], ["형사법"])
+        self.assertEqual([item["title"] for item in result["routines"]], ["온라인 경제 듣기"])
+
+    def test_life_calendar_picks_chores_due_today(self):
+        self.assertEqual(validate_items(DEFAULT_ITEMS), DEFAULT_ITEMS)
+        titles = lambda day: {item["title"] for item in life_today(DEFAULT_ITEMS, day) if item["repeat"] != "daily"}
+        # 2026-11-28 is a Saturday in even ISO week 48; the next Saturday is in odd week 49.
+        self.assertIn("시트·이불 커버 교체", titles(datetime(2026, 11, 28).date()))
+        self.assertNotIn("시트·이불 커버 교체", titles(datetime(2026, 12, 5).date()))
+        self.assertIn("냉장고 선반 전체, 후드 필터 청소", titles(datetime(2026, 12, 7).date()))
+        self.assertNotIn("냉장고 선반 전체, 후드 필터 청소", titles(datetime(2027, 1, 7).date()))
+        self.assertIn("냉방 시작 전 에어컨 필터 확인", titles(datetime(2027, 5, 1).date()))
+        self.client.post("/api/session", json={"code": "test-very-long-access-code"})
+        with patch("app.datetime") as clock:
+            clock.now.return_value = self.due
+            # 2026-11-25 is a Wednesday and the 25th.
+            today = {item["title"] for item in self.client.get("/api/briefing").json["life"] if item["repeat"] != "daily"}
+            self.assertEqual(today, {"책상·손 닿는 선반 닦고 청소기 돌리기", "세제통과 문 주변 닦기. 통세척·필터는 제품 설명서에 맞춰 관리"})
+            mine = [{"category": "장보기", "zone": "", "title": "생수 주문", "repeat": "weekly", "weekday": self.due.weekday()}]
+            self.assertEqual(self.client.post("/api/life", json={"items": mine}).status_code, 200)
+            self.assertEqual(self.client.post("/api/life", json={"items": [{**mine[0], "repeat": "monthly", "day": 31}]}).status_code, 400)
+            self.assertEqual([item["title"] for item in self.client.get("/api/briefing").json["life"]], ["생수 주문"])
 
     def test_kaiyon_portraits_are_served_as_webp(self):
         for variant in ("woman", "man"):

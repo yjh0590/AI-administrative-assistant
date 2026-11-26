@@ -373,6 +373,9 @@ input {
 .class-edit input, .class-edit select { min-width: 0; width: 100%; }
 .class-edit select { padding: 9px; background: #19132e; color: inherit; border-radius: 8px; }
 .class-times { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
+.routine-days { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 4px; }
+.class-edit .routine-days label { flex-direction: row; align-items: center; gap: 4px; }
+.class-edit .routine-days input { width: auto; }
 .card p { margin: 5px 0 0; }
 ul { padding: 0; list-style: none; margin: 0; }
 li { padding: 10px 0; overflow-wrap: anywhere; }

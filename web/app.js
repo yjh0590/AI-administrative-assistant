@@ -14,6 +14,7 @@ const sourceLabels = {
 const featureTitles = {
   briefing: "오늘의 브리핑",
   school: "학교 시간표",
+  life: "생활 캘린더",
   agenda: "네이버 일정",
   news: "관심 뉴스",
   bookings: "콕콕 예약",
@@ -22,6 +23,9 @@ const featureTitles = {
 const canSpeak = "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
 let digest;
 let schoolToday;
+let schoolRoutines = [];
+let schoolWeek = null;
+let lifeToday = [];
 let speaking;
 let poll;
 let toastTimer;
@@ -108,7 +112,11 @@ function showLogin() {
   finishSpeaking();
   digest = null;
   schoolToday = null;
+  schoolRoutines = [];
+  schoolWeek = null;
   clearTimetableEditor();
+  clearLifeEditor();
+  lifeToday = [];
   briefingCompleted = false;
   setBriefingActivity(false);
   renderedContent = null;
@@ -188,15 +196,18 @@ function renderView(navigated = false) {
   const feature = Object.hasOwn(featureTitles, route) ? route : null;
   const settings = feature === "settings";
   const school = feature === "school";
+  const life = feature === "life";
   const fullBriefing = feature === "briefing";
   if (!feature && !$("kaiyon-portrait").hasAttribute("src")) choosePortrait();
   $("menu").hidden = Boolean(feature);
   $("feature").hidden = !feature;
   $("settings").hidden = !settings;
-  $("briefing-tools").hidden = !feature || settings || school;
+  $("briefing-tools").hidden = !feature || settings || school || life;
   $("briefing").hidden = !feature || settings;
   $("timetable").hidden = !school;
   if (school) loadTimetableEditor();
+  $("life").hidden = !life;
+  if (life) loadLifeEditor();
   const agendaSetup = $("agenda-setup");
   if (feature === "agenda" && (navigated || agendaSetup.hidden)) {
     agendaSetup.open = !digest || digest.agenda.status === "unconfigured";
@@ -210,12 +221,13 @@ function renderView(navigated = false) {
     finishSpeaking();
   }
   if (feature && !settings) {
-    const contentKey = `${feature}:${digest?.generated ?? ""}:${JSON.stringify(schoolToday)}`;
+    const contentKey = `${feature}:${digest?.generated ?? ""}:${JSON.stringify([schoolToday, schoolRoutines, schoolWeek, lifeToday])}`;
     if (renderedContent !== contentKey) {
       const sections = fullBriefing ? Object.keys(sourceLabels) : [feature];
-      const cards = school ? [] : digest ? sections.map(kind => card(kind, fullBriefing)) : [
+      const cards = school || life ? [] : digest ? sections.map(kind => card(kind, fullBriefing)) : [
         node("p", "‘지금 확인’을 누르면 오늘 정보를 가져와요.", "card muted"),
       ];
+      if (life || (fullBriefing && lifeToday.length)) cards.unshift(lifeCard());
       if (school || (fullBriefing && schoolToday)) cards.unshift(schoolCard());
       $("briefing").replaceChildren(...cards);
       renderedContent = contentKey;
@@ -234,6 +246,9 @@ async function load() {
     result.briefing?.generated && result.briefing.generated !== digest?.generated;
   digest = result.briefing;
   schoolToday = result.school;
+  schoolRoutines = result.routines ?? [];
+  schoolWeek = result.week ?? null;
+  lifeToday = result.life ?? [];
   setBriefingActivity(result.busy, Boolean(completed));
   $("login").hidden = true;
   $("dashboard").hidden = false;
@@ -250,9 +265,10 @@ async function load() {
   const work = ofKind(schoolToday, "work").length;
   $("school-state").textContent = schoolToday
     ? `오늘 수업 ${ofKind(schoolToday, "class").length}개${work ? ` · 근로 ${work}건` : ""}` : "시간표 등록";
+  $("life-state").textContent = plannedLife().length ? `오늘 할 일 ${plannedLife().length}개` : "오늘은 매일 습관만";
   $("refresh").disabled = result.busy;
   $("refresh").textContent = result.busy ? "확인 중…" : "지금 확인";
-  for (const id of ["listen", "listen-quick"]) $(id).disabled = !canSpeak || !(digest || schoolToday || speaking);
+  for (const id of ["listen", "listen-quick"]) $(id).disabled = !canSpeak || !(digest || schoolToday || lifeToday.length || speaking);
   renderView();
   if (result.failed) message("브리핑을 만들지 못했어요. 잠시 후 다시 확인해 주세요.");
   const interval = result.busy ? 1200 : 30_000;
@@ -272,6 +288,7 @@ function spokenText(content) {
   const agenda = content?.agenda.items ?? [];
   const parts = ["주인님, 오늘의 브리핑입니다."];
   if (schoolToday) {
+    if (schoolWeek) parts.push(`오늘은 ${schoolWeek}주차입니다.`);
     const lessons = ofKind(schoolToday, "class");
     const work = ofKind(schoolToday, "work");
     if (lessons.length) {
@@ -283,6 +300,13 @@ function spokenText(content) {
       parts.push(`근로는 ${work.length}건이고, ${work.map(item =>
         `${timeFormat.format(new Date(item.start))}부터 ${timeFormat.format(new Date(item.end))}까지 ${item.title}`).join(", ")}입니다.`);
     }
+    if (schoolRoutines.length) {
+      parts.push(`오늘 할 일은 ${schoolRoutines.map(item => item.time ? `${item.time}에 ${item.title}` : item.title).join(", ")}입니다.`);
+    }
+  }
+  for (const category of new Set(plannedLife().map(item => item.category))) {
+    parts.push(`오늘 ${category} 일정은 ${plannedLife().filter(item => item.category === category)
+      .map(item => item.title).join(", ")}입니다.`);
   }
   if (agenda.length) {
     const first = agenda.find(item => !item.all_day) ?? agenda[0];
@@ -307,7 +331,7 @@ function toggleSpeech() {
     finishSpeaking();
     return;
   }
-  if (!digest && !schoolToday) return;
+  if (!digest && !schoolToday && !lifeToday.length) return;
   const utterance = new SpeechSynthesisUtterance(spokenText(digest));
   utterance.lang = "ko-KR";
   const voice = speechSynthesis.getVoices().find(option => option.lang.toLowerCase().startsWith("ko"));
@@ -443,6 +467,7 @@ document.addEventListener("visibilitychange", () => {
 });
 updateClock();
 initializeTimetable();
+initializeLife();
 setInterval(updateClock, 1000);
 load().catch(error => { if ($("login").hidden) message(error.message); });
 startPush();

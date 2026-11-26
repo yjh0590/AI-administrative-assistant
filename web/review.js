@@ -21,6 +21,7 @@ function reviewCards(data) {
   if (notice) lms.append(node("p", notice, "muted"));
   if (data.lms.items.length) lms.append(reviewList(data.lms.items.map(item => [item.title, lmsLabel(item)])));
 
+  const month = data.month ? [monthCard(data.month)] : [];
   const days = data.days.map(day => {
     const card = node("section", null, "card");
     card.append(node("h2", `${reviewDay(day.date)}${day.week ? ` · ${day.week}주차` : ""}`));
@@ -55,7 +56,35 @@ function reviewCards(data) {
     list.append(row);
   }
   check.append(list);
-  return [lms, ...days, check];
+  return [...month, lms, ...days, check];
+}
+
+// Shown on the last Sunday before a new month: roster, term dates, rarer chores and LMS due dates.
+function monthCard(month) {
+  const card = node("section", null, "card");
+  const label = `${Number(month.first.slice(5, 7))}월`;
+  card.append(node("h2", `다음 달 미리보기 · ${label}`));
+  card.append(node("h3", "근로 근무표"));
+  if (month.work_days.length) {
+    card.append(node("p", `${label} 근로 ${month.work_days.length}일이 등록돼 있어요. 첫날은 ${reviewDay(month.work_days[0])}이에요.`));
+  } else {
+    const missing = node("p", `${label} 근로가 아직 없어요. 근무표를 받으면 시간표에 날짜별로 넣어 주세요. `);
+    const link = node("a", "시간표 열기");
+    link.href = "#school";
+    missing.append(link);
+    card.append(missing);
+  }
+  if (month.term.length) {
+    card.append(node("h3", "학기 일정"), reviewList(month.term.map(item => [item.title, reviewDay(item.date)])));
+  }
+  if (month.chores.length) {
+    card.append(node("h3", "매달·계절 청소"), reviewList(month.chores.map(item =>
+      [item.title, [reviewDay(item.date), item.zone].filter(Boolean).join(" · ")])));
+  }
+  if (month.lms.items.length) {
+    card.append(node("h3", "LMS 마감"), reviewList(month.lms.items.map(item => [item.title, lmsLabel(item)])));
+  }
+  return card;
 }
 
 // The preview reads live LMS data, so reload it at most once a minute while the page stays open.

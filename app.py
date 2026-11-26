@@ -176,8 +176,11 @@ class Assistant:
         # Sunday evening: preview the coming week so finished or changed plans get fixed in time.
         due = datetime.combine(now.date(), self.review_time, SEOUL)
         if now.weekday() == 6 and due <= now < due + timedelta(hours=2):
-            self.deliver(f"{now.date().isoformat()}-review", now, "주간 점검",
-                         "다음 주 일정을 미리 확인하고 바뀐 것을 정리하세요.", "weekly-review", "/#review")
+            # The last Sunday before a new month also carries the monthly check.
+            monthly = any((now.date() + timedelta(days=offset)).day == 1 for offset in range(1, 8))
+            title, body = (("주간·월간 점검", "다음 주와 다음 달 일정을 미리 확인하고 근무표를 챙기세요.") if monthly
+                           else ("주간 점검", "다음 주 일정을 미리 확인하고 바뀐 것을 정리하세요."))
+            self.deliver(f"{now.date().isoformat()}-review", now, title, body, "weekly-review", "/#review")
 
     def deliver(self, key, now, title, body, tag, route):
         retry_before = (now - timedelta(minutes=5)).isoformat()

@@ -112,7 +112,7 @@ END:VCALENDAR
             event("지난 과제", "형사법 (2026-20)", "20261122T145900Z", "20261122T145900Z"),
             event("1차시", "융합교육의 이론과 실제 (2026-20)", "20261123T150000Z", "20261130T145959Z"),
             event("다음 차시", "융합교육의 이론과 실제 (2026-20)", "20261130T150000Z", "20261207T145959Z"),
-            event("형성평가 마감", "[한국어] 폭력예방교육", "20261127T145900Z", "20261127T145900Z"),
+            event("형성평가 마감", "[한국어] 학과(부)생 폭력예방교육", "20261127T145900Z", "20261127T145900Z"),
             event("Formative evaluation", "[English] Violence Prevention", "20261127T145900Z", "20261127T145900Z"),
         ]) + "END:VCALENDAR\r\n"
         response = Mock(content=body.encode())
@@ -121,7 +121,7 @@ END:VCALENDAR
             result = lms_items(self.now)
         self.assertEqual([(item["kind"], item["course"], item["title"]) for item in result["items"]], [
             ("due", "재무행정론", "과제2 기한"),
-            ("due", "[한국어] 폭력예방교육", "형성평가 마감"),
+            ("due", "학과(부)생 폭력예방교육", "형성평가 마감"),
             ("period", "융합교육의 이론과 실제", "1차시"),
         ])
         self.assertEqual(result["items"][0]["end"], "2026-11-26T23:59:00+09:00")
@@ -301,15 +301,23 @@ class AssistantTest(unittest.TestCase):
         self.assistant.run_review(sunday + timedelta(minutes=30))
         self.assistant.notify.assert_called_once()
         self.assertEqual(self.assistant.notify.call_args.args[3:], ("weekly-review", "/#review"))
+        # 2026-11-29 is the last Sunday of November, so the monthly check rides along.
+        self.assertEqual(self.assistant.notify.call_args.args[1], "주간·월간 점검")
         self.client.post("/api/session", json={"code": "test-very-long-access-code"})
-        self.assistant.save_timetable({"start": "2026-09-01", "last": "", "routines": [], "classes": [
-            {"kind": "class", "day": 0, "date": "", "start": "15:00", "end": "17:45", "title": "형사법", "room": ""}]})
+        self.assistant.save_timetable({"start": "2026-09-01", "last": "2026-12-14", "routines": [], "classes": [
+            {"kind": "class", "day": 0, "date": "", "start": "15:00", "end": "17:45", "title": "형사법", "room": ""},
+            {"kind": "work", "day": 1, "date": "2026-12-01", "start": "13:00", "end": "16:00", "title": "근로", "room": ""}]})
         with patch("app.datetime") as clock:
             clock.now.return_value = sunday
             review = self.client.get("/api/review").json
         self.assertEqual([day["date"] for day in review["days"]][::6], ["2026-11-30", "2026-12-06"])
         self.assertEqual((review["days"][0]["week"], review["days"][0]["classes"][0]["title"]), (14, "형사법"))
         self.assertIn("현관 바닥 모래·먼지 쓸기", [item["title"] for item in review["days"][3]["chores"]])
+        month = review["month"]
+        self.assertEqual((month["first"], month["work_days"], month["term"]),
+                         ("2026-12-01", ["2026-12-01"], [{"title": "수업 종료일", "date": "2026-12-14"}]))
+        self.assertIn(("2026-12-07", "냉장고 선반 전체, 후드 필터 청소"), [(item["date"], item["title"]) for item in month["chores"]])
+        self.assertNotIn("현관 바닥 모래·먼지 쓸기", [item["title"] for item in month["chores"]])
 
     def test_schedule_retries_failed_delivery_without_rebuilding(self):
         self.assistant.register({"endpoint": "test-device"})

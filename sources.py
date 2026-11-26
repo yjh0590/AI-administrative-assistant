@@ -324,7 +324,8 @@ def lms_items(now, until=None):
         elif (due and not now <= end <= now + timedelta(days=3)) or (not due and not start <= now < end):
             continue
         title = str(event.get("summary", "")).strip()[:200]
-        course = re.sub(r"\s*\(.*$", "", course).strip()[:100]
+        # Drop the trailing " (2026-20, CODE)" and the "[한국어]" tag, keeping brackets inside names like 학과(부)생.
+        course = re.sub(r"^\[한국어\]\s*|\s+\(.*$", "", course).strip()[:100]
         items[title, course, end] = {"title": title, "course": course, "kind": "due" if due else "period",
                                      "start": start.isoformat(), "end": end.isoformat()}
     return section("ok", sorted(items.values(), key=lambda item: (item["end"], item["title"])))

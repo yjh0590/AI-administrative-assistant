@@ -11,6 +11,7 @@
   <script src="/timetable.js" defer></script>
   <script src="/life.js" defer></script>
   <script src="/review.js" defer></script>
+  <script src="/talk.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -45,6 +46,7 @@
             <div class="kaiyon-frame">
               <img id="kaiyon-portrait" alt="" width="768" height="768" decoding="async" hidden>
             </div>
+            <button id="kaiyon-talk" class="kaiyon-talk" type="button" aria-label="카이온에게 말 걸기"></button>
             <div class="dial-face" role="group" aria-label="서울 현재 시각">
               <span class="dial-label">서울 · KST</span>
               <time id="clock" class="clock" datetime="00:00:00">--:--</time>
@@ -53,6 +55,16 @@
             <span class="dial-south" aria-hidden="true"></span>
           </div>
         </div>
+        <section class="talk card" aria-labelledby="talk-title">
+          <h2 id="talk-title">카이온에게 물어보기</h2>
+          <p class="muted">카이온을 누르거나 말하기를 눌러 질문하세요. 오늘 일정, 근로, LMS 마감, 청소를 알고 대답해요.</p>
+          <div id="talk-log" class="talk-log" aria-live="polite" hidden></div>
+          <form id="talk-form" class="talk-form">
+            <button id="talk-mic" class="secondary" type="button">말하기</button>
+            <input id="talk-input" maxlength="500" placeholder="예: 오늘 몇 시에 끝나?" autocomplete="off" aria-label="카이온에게 할 질문">
+            <button type="submit">보내기</button>
+          </form>
+        </section>
         <nav class="menu" aria-label="AI 비서 메뉴">
           <a class="menu-link" href="#school"><span class="tool-icon calendar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>학교 시간표</strong><span class="tool-status" id="school-state">시간표 등록</span></a>
           <a class="menu-link" href="#life"><span class="tool-icon calendar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>생활 캘린더</strong><span class="tool-status" id="life-state">청소와 생활 일정</span></a>

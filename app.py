@@ -24,6 +24,7 @@ from waitress import serve
 
 from sources import SEOUL, build_briefing
 from life import DEFAULT_ITEMS, life_today, validate_items
+from chat import ChatError, ask, build_context, validate_messages
 from lms_sync import sync_today, validate_sync
 from review import week_review
 from timetable import read_photo, school_today, stored, validate_timetable
@@ -66,6 +67,7 @@ class Assistant:
         self.collect = collect
         self.generation_lock = threading.Lock()
         self.photo_lock = threading.Lock()
+        self.chat_lock = threading.Lock()
         self.generation_failed = False
         self.key_file = directory / "vapid.pem"
         if not self.key_file.exists():
@@ -326,6 +328,31 @@ def create_app(assistant, code, origin="", remote=""):
             return jsonify(error="LMS 데이터 형식을 확인해 주세요."), 400
         assistant.save_lms_sync(sync)
         return jsonify(courses=len(sync["courses"]), synced=sync["synced"])
+
+    @app.post("/api/chat")
+    @require_login
+    def chat():
+        request.max_content_length = 32 * 1024
+        try:
+            messages = validate_messages(json_object().get("messages"))
+        except (AttributeError, TypeError, ValueError):
+            return jsonify(error="대화 내용을 확인해 주세요."), 400
+        # One answer at a time keeps a stuck mic or double tap from spending credits twice.
+        if not assistant.chat_lock.acquire(blocking=False):
+            return jsonify(error="카이온이 아직 앞 질문에 답하는 중이에요."), 429
+        try:
+            now = datetime.now(SEOUL)
+            timetable, life = assistant.timetable(), assistant.life()
+            context = build_context(
+                now, assistant.briefing(now.date().isoformat()),
+                school_today(timetable, now) if timetable else None, life_today(life, now.date()),
+                sync_today(assistant.lms_sync(), now.date()), week_review(timetable, life, now.date() + timedelta(days=1)),
+            )
+            return jsonify(reply=ask(messages, context))
+        except ChatError as error:
+            return jsonify(error=str(error)), 503
+        finally:
+            assistant.chat_lock.release()
 
     @app.get("/api/review")
     @require_login

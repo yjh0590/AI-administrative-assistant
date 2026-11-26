@@ -318,6 +318,27 @@ class AssistantTest(unittest.TestCase):
         self.assertEqual(session.request.call_args.args, ("POST", "https://kaiyon.example.test/api/timetable"))
         self.assertIsNone(self.assistant.timetable())
 
+    def test_chat_sends_todays_data_and_explains_failures(self):
+        self.client.post("/api/session", json={"code": "test-very-long-access-code"})
+        weekday = self.due.weekday()
+        self.assistant.save_timetable({"start": "2026-09-01", "last": "", "routines": [], "classes": [
+            {"kind": "class", "day": weekday, "date": "", "start": "15:00", "end": "17:45", "title": "행정법", "room": "13-208"}]})
+        env = {"AI_BASE_URL": "https://ai.example.test/v1/gateway", "AI_API_KEY": "k", "AI_MODEL": "claude-haiku-5-5", "LMS_ICAL_URL": ""}
+        ok = Mock(ok=True, status_code=200, text="", json=Mock(return_value={"choices": [{"message": {"content": "주인님, 오늘은 행정법이 있습니다."}}]}))
+        question = {"messages": [{"role": "user", "content": "오늘 수업 뭐야?"}]}
+        with patch.dict(os.environ, env), patch("app.datetime") as clock, patch("chat.requests.post", return_value=ok) as post:
+            clock.now.return_value = self.due
+            self.assertEqual(self.client.post("/api/chat", json=question).json, {"reply": "주인님, 오늘은 행정법이 있습니다."})
+            self.assertEqual(self.client.post("/api/chat", json={"messages": [{"role": "assistant", "content": "x"}]}).status_code, 400)
+            post.return_value = Mock(ok=False, status_code=402, text='{"error":"insufficient credit"}')
+            failed = self.client.post("/api/chat", json=question)
+        self.assertEqual(failed.status_code, 503)
+        self.assertIn("크레딧", failed.json["error"])
+        body = post.call_args_list[0].kwargs["json"]
+        self.assertEqual(post.call_args_list[0].args[0], "https://ai.example.test/v1/gateway/chat/completions/")
+        self.assertEqual((body["model"], body["messages"][-1]), ("claude-haiku-5-5", {"role": "user", "content": "오늘 수업 뭐야?"}))
+        self.assertIn("오늘 수업: 행정법 15:00~17:45 13-208", body["messages"][0]["content"])
+
     def test_kaiyon_portraits_are_served_as_webp(self):
         for variant in ("woman", "man"):
             with self.client.get(f"/kaiyon-{variant}.webp") as response:

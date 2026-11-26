@@ -71,6 +71,7 @@ function connectionState(online) {
 function renderKaiyonActivity() {
   const display = $("kaiyon-display");
   if (speaking) display.dataset.state = "speaking";
+  else if (talkState) display.dataset.state = talkState;
   else if (briefingBusy) display.dataset.state = "working";
   else display.dataset.state = briefingCompleted ? "ready" : "idle";
 }
@@ -517,6 +518,7 @@ document.addEventListener("visibilitychange", () => {
 updateClock();
 initializeTimetable();
 initializeLife();
+initializeTalk();
 setInterval(updateClock, 1000);
 load().catch(error => { if ($("login").hidden) message(error.message); });
 startPush();

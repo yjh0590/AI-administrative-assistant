@@ -18,11 +18,13 @@ from cryptography.hazmat.primitives import serialization
 from dotenv import load_dotenv
 from flask import Flask, abort, jsonify, request, session
 from py_vapid import Vapid
+import requests
 from pywebpush import WebPushException, webpush
 from waitress import serve
 
 from sources import SEOUL, build_briefing
 from life import DEFAULT_ITEMS, life_today, validate_items
+from lms_sync import sync_today, validate_sync
 from review import week_review
 from timetable import read_photo, school_today, stored, validate_timetable
 
@@ -79,6 +81,7 @@ class Assistant:
                 CREATE TABLE IF NOT EXISTS briefings (day TEXT PRIMARY KEY, content TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS timetable (id INTEGER PRIMARY KEY CHECK (id = 1), content TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS life (id INTEGER PRIMARY KEY CHECK (id = 1), content TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS lms_sync (id INTEGER PRIMARY KEY CHECK (id = 1), content TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS devices (endpoint TEXT PRIMARY KEY, subscription TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS deliveries (
                     day TEXT NOT NULL, endpoint TEXT NOT NULL REFERENCES devices(endpoint) ON DELETE CASCADE,
@@ -97,6 +100,15 @@ class Assistant:
         with self.db() as db:
             row = db.execute("SELECT content FROM briefings WHERE day = ?", (day,)).fetchone()
         return json.loads(row[0]) if row else None
+
+    def lms_sync(self):
+        with self.db() as db:
+            row = db.execute("SELECT content FROM lms_sync WHERE id = 1").fetchone()
+        return json.loads(row[0]) if row else None
+
+    def save_lms_sync(self, sync):
+        with self.db() as db:
+            db.execute("INSERT OR REPLACE INTO lms_sync VALUES (1, ?)", (json.dumps(sync, ensure_ascii=False),))
 
     def life(self):
         with self.db() as db:
@@ -222,7 +234,7 @@ class Assistant:
             threading.Event().wait(20)
 
 
-def create_app(assistant, code, origin=""):
+def create_app(assistant, code, origin="", remote=""):
     mimetypes.add_type("image/webp", ".webp")
     app = Flask(__name__, static_folder=str(ROOT / "web"), static_url_path="")
     app.config.update(
@@ -234,7 +246,8 @@ def create_app(assistant, code, origin=""):
 
     @app.before_request
     def reject_cross_origin_post():
-        if request.method == "POST":
+        # The LMS extension posts from its own chrome-extension:// origin and proves itself with a token instead.
+        if request.method == "POST" and request.endpoint != "lms_import":
             request_origin = request.headers.get("Origin")
             if request_origin and request_origin != (origin or request.host_url.rstrip("/")):
                 abort(403)
@@ -297,8 +310,22 @@ def create_app(assistant, code, origin=""):
             date=today, briefing=assistant.briefing(today), schedule=assistant.briefing_time.strftime("%H:%M"),
             busy=busy, failed=assistant.generation_failed,
             school=school["classes"], routines=school["routines"], week=school["week"],
-            life=life_today(assistant.life(), now.date()),
+            life=life_today(assistant.life(), now.date()), lms_sync=sync_today(assistant.lms_sync(), now.date()),
         )
+
+    @app.post("/api/lms/import")
+    def lms_import():
+        token = os.getenv("LMS_SYNC_TOKEN", "").strip()
+        sent = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        if len(token) < 32 or not hmac.compare_digest(sent.encode(), token.encode()):
+            return jsonify(error="연결 토큰을 확인해 주세요."), 401
+        request.max_content_length = 1024 * 1024
+        try:
+            sync = validate_sync(json_object())
+        except (AttributeError, TypeError, ValueError):
+            return jsonify(error="LMS 데이터 형식을 확인해 주세요."), 400
+        assistant.save_lms_sync(sync)
+        return jsonify(courses=len(sync["courses"]), synced=sync["synced"])
 
     @app.get("/api/review")
     @require_login
@@ -322,9 +349,23 @@ def create_app(assistant, code, origin=""):
         assistant.save_life(items)
         return jsonify(items=items)
 
+    def remote_timetable(body=None):
+        # PC photo mode: OCR runs on this Windows PC, but the timetable itself lives on the server.
+        try:
+            with requests.Session() as session:
+                session.headers["Origin"] = remote
+                session.post(f"{remote}/api/session", json={"code": code}, timeout=10).raise_for_status()
+                response = session.request("POST" if body else "GET", f"{remote}/api/timetable", json=body, timeout=15)
+            return jsonify(response.json()), response.status_code
+        except (requests.RequestException, ValueError) as error:
+            LOG.warning("Remote timetable failed (%s)", type(error).__name__)
+            return jsonify(error="서버 카이온에 연결하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요."), 502
+
     @app.get("/api/timetable")
     @require_login
     def get_timetable():
+        if remote:
+            return remote_timetable()
         return jsonify(assistant.timetable() or {"start": "", "last": "", "classes": [], "routines": []})
 
     @app.post("/api/timetable")
@@ -335,6 +376,8 @@ def create_app(assistant, code, origin=""):
             timetable = validate_timetable(json_object())
         except (KeyError, TypeError, ValueError):
             return jsonify(error="개강일, 과목, 요일, 시간, 주차와 규칙 내용을 확인해 주세요."), 400
+        if remote:
+            return remote_timetable(timetable)
         assistant.save_timetable(timetable)
         return jsonify(timetable)
 
@@ -420,10 +463,17 @@ def main():
     briefing_time = datetime.strptime(os.getenv("BRIEFING_TIME", "07:30"), "%H:%M").time()
     review_time = datetime.strptime(os.getenv("WEEKLY_REVIEW_TIME", "21:00"), "%H:%M").time()
     assistant = Assistant(directory, briefing_time, review_time=review_time)
-    app = create_app(assistant, code, origin)
+    remote = os.getenv("KAIYON_REMOTE", "").strip().rstrip("/")
+    if remote and not remote.startswith("https://"):
+        raise SystemExit("KAIYON_REMOTE에는 https://로 시작하는 서버 카이온 주소만 지정하세요.")
+    app = create_app(assistant, code, origin, remote)
     if not origin:
         app.config["TRUSTED_HOSTS"] = ["localhost", "127.0.0.1"]
-    threading.Thread(target=assistant.schedule, daemon=True).start()
+    # In PC photo mode the server sends the notifications, so this copy must not.
+    if remote:
+        print(f"PC 사진 인식 모드: 시간표는 {remote}에 저장해요.", flush=True)
+    else:
+        threading.Thread(target=assistant.schedule, daemon=True).start()
     print(f"AI 비서 접속 주소: {origin or f'http://localhost:{port}'}", flush=True)
     print("접속 코드는 .env 또는 .data/access-code.txt에서 확인하세요.", flush=True)
     serve(app, host="127.0.0.1", port=port)

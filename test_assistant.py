@@ -274,6 +274,50 @@ class AssistantTest(unittest.TestCase):
             self.assertEqual(self.client.post("/api/life", json={"items": [{**mine[0], "repeat": "monthly", "day": 31}]}).status_code, 400)
             self.assertEqual([item["title"] for item in self.client.get("/api/briefing").json["life"]], ["생수 주문"])
 
+    def test_lms_extension_upload_needs_token_and_feeds_briefing(self):
+        upload = {"synced": "2026-11-25T06:30:00+09:00", "courses": [{
+            "id": "6053", "name": "재무행정론 (CFB6008001)", "url": "https://lms.inu.ac.kr/course/view.php?id=6053",
+            "notices": [
+                {"title": "11월 25일 수업은 온라인", "posted": "2026-11-24", "url": "https://lms.inu.ac.kr/mod/ubboard/article.php?id=1",
+                 "body": "긴 본문" * 500, "excerpt": "녹화 강의로 대체합니다."},
+                {"title": "조편성 공지", "posted": "2026-09-26", "url": "https://lms.inu.ac.kr/mod/ubboard/article.php?id=2"},
+            ],
+            "weeks": [{"week": 13, "start": "2026-11-24", "end": "2026-11-30", "online": True,
+                       "activities": [{"type": "vod", "title": "13주차", "open": "2026-11-24T00:00:00+09:00", "close": None}]}],
+        }]}
+        token = "t" * 40
+        extension = {"Origin": "chrome-extension://abcdef"}
+        with patch.dict(os.environ, {"LMS_SYNC_TOKEN": token}):
+            wrong = self.client.post("/api/lms/import", json=upload, headers={**extension, "Authorization": "Bearer nope"})
+            self.assertEqual(wrong.status_code, 401)
+            bad = {**upload, "courses": [{**upload["courses"][0], "url": "https://evil.test/course"}]}
+            self.assertEqual(self.client.post("/api/lms/import", json=bad, headers={**extension, "Authorization": f"Bearer {token}"}).status_code, 400)
+            saved = self.client.post("/api/lms/import", json=upload, headers={**extension, "Authorization": f"Bearer {token}"})
+            self.assertEqual(saved.json, {"courses": 1, "synced": "2026-11-25T06:30:00+09:00"})
+        self.assertNotIn("body", self.assistant.lms_sync()["courses"][0]["notices"][0])
+        self.client.post("/api/session", json={"code": "test-very-long-access-code"})
+        with patch("app.datetime") as clock:
+            clock.now.return_value = self.due
+            sync = self.client.get("/api/briefing").json["lms_sync"]
+        self.assertEqual([(item["course"], item["title"]) for item in sync["notices"]], [("재무행정론", "11월 25일 수업은 온라인")])
+        self.assertEqual((sync["online"], sync["stale"]), (["재무행정론"], False))
+
+    def test_pc_photo_mode_keeps_timetable_on_server(self):
+        client = create_app(self.assistant, "test-very-long-access-code", "", "https://kaiyon.example.test").test_client()
+        client.post("/api/session", json={"code": "test-very-long-access-code"})
+        server = {"start": "2026-09-01", "last": "", "classes": [], "routines": []}
+        with patch("app.requests.Session") as Session:
+            session = Session.return_value.__enter__.return_value
+            session.request.return_value = Mock(status_code=200, json=Mock(return_value=server))
+            self.assertEqual(client.get("/api/timetable").json, server)
+            row = {"kind": "class", "day": 0, "start": "09:00", "end": "10:00", "title": "행정학"}
+            self.assertEqual(client.post("/api/timetable", json={"classes": [row]}).status_code, 200)
+            self.assertEqual(client.post("/api/timetable", json={"classes": [{**row, "end": "08:00"}]}).status_code, 400)
+        session.post.assert_called_with("https://kaiyon.example.test/api/session",
+                                        json={"code": "test-very-long-access-code"}, timeout=10)
+        self.assertEqual(session.request.call_args.args, ("POST", "https://kaiyon.example.test/api/timetable"))
+        self.assertIsNone(self.assistant.timetable())
+
     def test_kaiyon_portraits_are_served_as_webp(self):
         for variant in ("woman", "man"):
             with self.client.get(f"/kaiyon-{variant}.webp") as response:

@@ -23,8 +23,10 @@ function schoolCard() {
     card.append(list);
   };
   for (const kind of ["class", "work"]) {
+    // A course whose LMS week has video lectures may be online instead of in the room this week.
     section(kinds[kind], ofKind(schoolToday, kind), item => `${timeFormat.format(new Date(item.start))} ~ ${
-      timeFormat.format(new Date(item.end))}${item.room ? ` · ${item.room}` : ""}`);
+      timeFormat.format(new Date(item.end))}${item.room ? ` · ${item.room}` : ""}${
+      lmsSync?.online.includes(item.title) ? " · 이번 주 LMS 동영상 수업" : ""}`);
   }
   section("오늘 할 일", schoolRoutines, item => [item.time, item.course].filter(Boolean).join(" · "));
   return card;
@@ -347,7 +349,10 @@ function initializeTimetable() {
       recognized.hidden = !result.text;
       const candidates = timetableCandidates(preview, result.words, blocks.words);
       if (candidates.length) {
-        $("timetable-rows").replaceChildren();
+        // A photo only shows the weekly grid, so keep dated rows (work rosters) and online classes.
+        for (const field of [...$("timetable-rows").children]) {
+          if (!field.querySelector('[name="date"]').value && field.querySelector('[name="kind"]').value !== "online") field.remove();
+        }
         candidates.forEach(addClassRow);
         status.textContent = `${candidates.length}개 칸을 찾았어요. 원본과 비교해 구분, 이름, 요일, 시간을 확인하고 저장해 주세요.`;
       } else {

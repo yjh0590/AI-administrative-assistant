@@ -30,6 +30,8 @@ let schoolToday;
 let schoolRoutines = [];
 let schoolWeek = null;
 let lifeToday = [];
+// Notices and video weeks uploaded by the LMS Chrome extension.
+let lmsSync = null;
 let speaking;
 let poll;
 let toastTimer;
@@ -121,6 +123,7 @@ function showLogin() {
   clearTimetableEditor();
   clearLifeEditor();
   lifeToday = [];
+  lmsSync = null;
   briefingCompleted = false;
   setBriefingActivity(false);
   renderedContent = null;
@@ -149,6 +152,28 @@ const lmsWhen = value => `${shortDateFormat.format(new Date(value))} ${timeForma
 // Due dates carry one moment; lecture periods carry an open window.
 const lmsLabel = item => [item.course, item.kind === "due" ? `마감 ${lmsWhen(item.end)}` : `수강 기간 ~ ${lmsWhen(item.end)}`]
   .filter(Boolean).join(" · ");
+
+function syncNodes() {
+  const nodes = [];
+  if (lmsSync.stale) {
+    nodes.push(node("p", `LMS 공지 동기화가 오래됐어요. 마지막 동기화 ${lmsWhen(lmsSync.synced)}. PC 크롬 확장프로그램에서 다시 보내 주세요.`, "muted"));
+  }
+  if (lmsSync.notices.length) {
+    const list = node("ul");
+    for (const notice of lmsSync.notices) {
+      const row = node("li");
+      const link = node("a", notice.title);
+      link.href = notice.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      row.append(link, node("span", `${notice.course} · ${notice.posted}`, "detail"));
+      if (notice.excerpt) row.append(node("p", notice.excerpt));
+      list.append(row);
+    }
+    nodes.push(node("h3", "LMS 새 공지"), list);
+  }
+  return nodes;
+}
 
 function sourceNotice(kind, content) {
   const [label, empty] = sourceLabels[kind];
@@ -197,6 +222,7 @@ function card(kind, includeHeading) {
     list.append(row);
   }
   if (list.childElementCount) section.append(list);
+  if (kind === "lms" && lmsSync) section.append(...syncNodes());
   return section;
 }
 
@@ -234,7 +260,7 @@ function renderView(navigated = false) {
     finishSpeaking();
   }
   if (feature && !settings && !review) {
-    const contentKey = `${feature}:${digest?.generated ?? ""}:${JSON.stringify([schoolToday, schoolRoutines, schoolWeek, lifeToday])}`;
+    const contentKey = `${feature}:${digest?.generated ?? ""}:${JSON.stringify([schoolToday, schoolRoutines, schoolWeek, lifeToday, lmsSync])}`;
     if (renderedContent !== contentKey) {
       // Briefings saved before a source existed lack its key, so only render the ones present.
       const sections = (fullBriefing ? Object.keys(sourceLabels) : [feature]).filter(kind => digest?.[kind]);
@@ -263,6 +289,7 @@ async function load() {
   schoolRoutines = result.routines ?? [];
   schoolWeek = result.week ?? null;
   lifeToday = result.life ?? [];
+  lmsSync = result.lms_sync ?? null;
   setBriefingActivity(result.busy, Boolean(completed));
   $("login").hidden = true;
   $("dashboard").hidden = false;
@@ -334,6 +361,9 @@ function spokenText(content) {
   const closing = lms.filter(item => item.kind === "period" && new Date(item.end) - Date.now() < 2 * 864e5);
   if (due.length) parts.push(`LMS 마감은 ${due.map(item => `${item.course} ${item.title}, ${lmsWhen(item.end)}`).join(", ")}입니다.`);
   if (closing.length) parts.push(`수강 기간이 곧 끝나는 온라인 강의는 ${closing.map(item => `${item.course} ${item.title}`).join(", ")}입니다.`);
+  if (lmsSync?.notices.length) {
+    parts.push(`LMS 새 공지는 ${lmsSync.notices.map(item => `${item.course}, ${item.title}`).join(". ")}입니다.`);
+  }
   const headlines = content?.news.items.slice(0, 3) ?? [];
   if (headlines.length) parts.push("관심 뉴스 제목입니다.", ...headlines.map(item => `${item.title}.`));
   for (const key of ["agenda", "news"]) {

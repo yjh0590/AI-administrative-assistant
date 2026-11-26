@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 import caldav
 import feedparser
+import icalendar
 import requests
 
 SEOUL = ZoneInfo("Asia/Seoul")
@@ -287,13 +288,52 @@ def booking_items():
     return section("ok" if len(items) == len(ids) else "partial", items)
 
 
+def lms_time(value):
+    if not isinstance(value, datetime):
+        return datetime.combine(value, time.min, SEOUL)
+    return value.astimezone(SEOUL) if value.tzinfo else value.replace(tzinfo=SEOUL)
+
+
+def lms_items(now):
+    # Moodle's calendar export (Calendar > Export > Get calendar URL) lists due dates and lecture periods.
+    url = os.getenv("LMS_ICAL_URL", "").strip()
+    if not url:
+        return section("unconfigured")
+    if not web_url(url):
+        raise ValueError("Invalid LMS URL")
+    response = requests.get(url, timeout=(5, 15))
+    response.raise_for_status()
+    if len(response.content) > 2_000_000:
+        raise ValueError("LMS calendar too large")
+    items = {}
+    for event in icalendar.Calendar.from_ical(response.content).walk("VEVENT"):
+        categories = event.get("categories") or []
+        names = [str(name) for group in (categories if isinstance(categories, list) else [categories]) for name in group.cats]
+        course = names[0] if names else ""
+        # ponytail: school-wide trainings repeat every event in English and Chinese; widen if more languages appear.
+        if course.startswith(("[English]", "[中文]")):
+            continue
+        start = lms_time(event.decoded("dtstart"))
+        end = lms_time(event.decoded("dtend")) if event.get("dtend") else start
+        due = start == end
+        # Due dates show for the next three days; lecture periods show while they are open.
+        if (due and not now <= end <= now + timedelta(days=3)) or (not due and not start <= now < end):
+            continue
+        title = str(event.get("summary", "")).strip()[:200]
+        course = re.sub(r"\s*\(.*$", "", course).strip()[:100]
+        items[title, course, end] = {"title": title, "course": course, "kind": "due" if due else "period",
+                                     "start": start.isoformat(), "end": end.isoformat()}
+    return section("ok", sorted(items.values(), key=lambda item: (item["end"], item["title"])))
+
+
 def build_briefing(now):
     now = now.astimezone(SEOUL)
     agenda = optional_source("Naver Calendar", lambda: calendar_events(now.date()))
     news = optional_source("News", lambda: news_items(now))
     bookings = optional_source("Kokkok", booking_items)
+    lms = optional_source("LMS", lambda: lms_items(now))
     summarize_news(news["items"])
     return {
         "date": now.date().isoformat(), "generated": now.isoformat(),
-        "agenda": agenda, "news": news, "bookings": bookings,
+        "agenda": agenda, "lms": lms, "news": news, "bookings": bookings,
     }

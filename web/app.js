@@ -1,6 +1,7 @@
 const $ = id => document.getElementById(id);
 const dateFormat = new Intl.DateTimeFormat("ko-KR", { dateStyle: "full", timeZone: "Asia/Seoul" });
 const timeFormat = new Intl.DateTimeFormat("ko-KR", { hour: "numeric", minute: "numeric", timeZone: "Asia/Seoul" });
+const shortDateFormat = new Intl.DateTimeFormat("ko-KR", { month: "numeric", day: "numeric", weekday: "short", timeZone: "Asia/Seoul" });
 const clockFormat = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "Asia/Seoul" });
 const kaiyonPortraits = [
   { src: "/kaiyon-woman.webp", alt: "초승달 장식의 여성형 카이온" },
@@ -8,6 +9,7 @@ const kaiyonPortraits = [
 ];
 const sourceLabels = {
   agenda: ["네이버 캘린더", "오늘 등록된 일정이 없어요."],
+  lms: ["LMS 일정", "3일 안에 마감되거나 지금 수강 중인 LMS 일정이 없어요."],
   news: ["관심 뉴스", "조건에 맞는 최근 기사가 없어요."],
   bookings: ["콕콕 페이지 확인", "표시할 예약이 없어요."],
 };
@@ -16,6 +18,7 @@ const featureTitles = {
   school: "학교 시간표",
   life: "생활 캘린더",
   agenda: "네이버 일정",
+  lms: "LMS 일정",
   news: "관심 뉴스",
   bookings: "콕콕 예약",
   settings: "알림 설정",
@@ -141,6 +144,11 @@ function eventLabel(item, date) {
   return `${from} ~ ${to}`;
 }
 
+const lmsWhen = value => `${shortDateFormat.format(new Date(value))} ${timeFormat.format(new Date(value))}`;
+// Due dates carry one moment; lecture periods carry an open window.
+const lmsLabel = item => [item.course, item.kind === "due" ? `마감 ${lmsWhen(item.end)}` : `수강 기간 ~ ${lmsWhen(item.end)}`]
+  .filter(Boolean).join(" · ");
+
 function sourceNotice(kind, content) {
   const [label, empty] = sourceLabels[kind];
   if (content.status === "unconfigured") return `${label} 연결이 필요해요.`;
@@ -154,7 +162,7 @@ function menuStatus(kind) {
   if (!content) return "브리핑 확인 대기";
   if (content.status === "unconfigured") return "연결 필요";
   if (content.status === "unavailable") return "확인 실패";
-  const units = { agenda: "일정", news: "기사", bookings: "확인 중인 페이지" };
+  const units = { agenda: "일정", lms: "일정", news: "기사", bookings: "확인 중인 페이지" };
   const count = `${units[kind]} ${content.items.length}건`;
   return content.status === "partial" ? `${count} · 일부 확인` : count;
 }
@@ -176,6 +184,7 @@ function card(kind, includeHeading) {
       row.append(link);
     } else row.append(node("strong", item.title));
     if (kind === "agenda") row.append(node("span", eventLabel(item, digest.date), "detail"));
+    if (kind === "lms") row.append(node("span", lmsLabel(item), "detail"));
     if (kind === "news") {
       if (item.summary) row.append(node("p", item.summary));
       row.append(node("span", item.source, "detail"));
@@ -223,8 +232,9 @@ function renderView(navigated = false) {
   if (feature && !settings) {
     const contentKey = `${feature}:${digest?.generated ?? ""}:${JSON.stringify([schoolToday, schoolRoutines, schoolWeek, lifeToday])}`;
     if (renderedContent !== contentKey) {
-      const sections = fullBriefing ? Object.keys(sourceLabels) : [feature];
-      const cards = school || life ? [] : digest ? sections.map(kind => card(kind, fullBriefing)) : [
+      // Briefings saved before a source existed lack its key, so only render the ones present.
+      const sections = (fullBriefing ? Object.keys(sourceLabels) : [feature]).filter(kind => digest?.[kind]);
+      const cards = school || life ? [] : sections.length ? sections.map(kind => card(kind, fullBriefing)) : [
         node("p", "‘지금 확인’을 누르면 오늘 정보를 가져와요.", "card muted"),
       ];
       if (life || (fullBriefing && lifeToday.length)) cards.unshift(lifeCard());
@@ -314,6 +324,12 @@ function spokenText(content) {
     const firstEvent = first.all_day ? `종일 일정인 ${first.title}` : `${firstTime} ${first.title}`;
     parts.push(`오늘 일정은 ${agenda.length}건입니다. 첫 일정은 ${firstEvent}입니다.`);
   }
+  const lms = content?.lms?.items ?? [];
+  const due = lms.filter(item => item.kind === "due");
+  // Mention lecture periods only when they close within two days.
+  const closing = lms.filter(item => item.kind === "period" && new Date(item.end) - Date.now() < 2 * 864e5);
+  if (due.length) parts.push(`LMS 마감은 ${due.map(item => `${item.course} ${item.title}, ${lmsWhen(item.end)}`).join(", ")}입니다.`);
+  if (closing.length) parts.push(`수강 기간이 곧 끝나는 온라인 강의는 ${closing.map(item => `${item.course} ${item.title}`).join(", ")}입니다.`);
   const headlines = content?.news.items.slice(0, 3) ?? [];
   if (headlines.length) parts.push("관심 뉴스 제목입니다.", ...headlines.map(item => `${item.title}.`));
   for (const key of ["agenda", "news"]) {

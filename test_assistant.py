@@ -12,7 +12,7 @@ from icalendar import Calendar
 
 from app import Assistant, create_app
 from life import DEFAULT_ITEMS, life_today, validate_items
-from sources import SEOUL, booking_items, build_briefing, calendar_events, news_items, section, summarize_news
+from sources import SEOUL, booking_items, build_briefing, calendar_events, lms_items, news_items, section, summarize_news
 
 
 class SourcesTest(unittest.TestCase):
@@ -100,6 +100,31 @@ END:VCALENDAR
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["items"], [{"title": 'AI "반도체" 투자', "summary": "설명",
                                             "url": "https://n.news.naver.com/1", "source": "네이버 뉴스"}])
+
+    def test_lms_keeps_near_due_dates_and_open_lecture_periods(self):
+        # now is 2026-11-25 07:30 KST (2026-11-24 22:30 UTC).
+        def event(summary, course, start, end):
+            return (f"BEGIN:VEVENT\r\nUID:{summary}{course}\r\nSUMMARY:{summary}\r\nCATEGORIES:{course}\r\n"
+                    f"DTSTART:{start}\r\nDTEND:{end}\r\nEND:VEVENT\r\n")
+        body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n" + "".join([
+            event("과제2 기한", "재무행정론 (2026-20\\, CFB6008)", "20261126T145900Z", "20261126T145900Z"),
+            event("기말 보고서", "재무행정론 (2026-20\\, CFB6008)", "20261210T145900Z", "20261210T145900Z"),
+            event("지난 과제", "형사법 (2026-20)", "20261122T145900Z", "20261122T145900Z"),
+            event("1차시", "융합교육의 이론과 실제 (2026-20)", "20261123T150000Z", "20261130T145959Z"),
+            event("다음 차시", "융합교육의 이론과 실제 (2026-20)", "20261130T150000Z", "20261207T145959Z"),
+            event("형성평가 마감", "[한국어] 폭력예방교육", "20261127T145900Z", "20261127T145900Z"),
+            event("Formative evaluation", "[English] Violence Prevention", "20261127T145900Z", "20261127T145900Z"),
+        ]) + "END:VCALENDAR\r\n"
+        response = Mock(content=body.encode())
+        with patch.dict(os.environ, {"LMS_ICAL_URL": "https://lms.example.test/calendar"}), \
+                patch("sources.requests.get", return_value=response):
+            result = lms_items(self.now)
+        self.assertEqual([(item["kind"], item["course"], item["title"]) for item in result["items"]], [
+            ("due", "재무행정론", "과제2 기한"),
+            ("due", "[한국어] 폭력예방교육", "형성평가 마감"),
+            ("period", "융합교육의 이론과 실제", "1차시"),
+        ])
+        self.assertEqual(result["items"][0]["end"], "2026-11-26T23:59:00+09:00")
 
     def test_news_summary_falls_back_when_model_output_is_invalid(self):
         item = {"title": "제목", "summary": "원문 발췌"}

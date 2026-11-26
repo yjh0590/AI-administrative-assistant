@@ -23,6 +23,7 @@ from waitress import serve
 
 from sources import SEOUL, build_briefing
 from life import DEFAULT_ITEMS, life_today, validate_items
+from review import week_review
 from timetable import read_photo, school_today, stored, validate_timetable
 
 ROOT = Path(__file__).resolve().parent
@@ -54,11 +55,12 @@ def subscription_data(data):
 
 
 class Assistant:
-    def __init__(self, directory, briefing_time, collect=build_briefing):
+    def __init__(self, directory, briefing_time, collect=build_briefing, review_time=time(21, 0)):
         self.directory = directory
         directory.mkdir(parents=True, exist_ok=True)
         self.database = directory / "assistant.db"
         self.briefing_time = briefing_time
+        self.review_time = review_time
         self.collect = collect
         self.generation_lock = threading.Lock()
         self.photo_lock = threading.Lock()
@@ -148,10 +150,10 @@ class Assistant:
         with self.db() as db:
             db.execute("DELETE FROM devices WHERE endpoint = ?", (endpoint,))
 
-    def notify(self, subscription, title, body, tag):
+    def notify(self, subscription, title, body, tag, route="/#briefing"):
         try:
             webpush(
-                subscription, json.dumps({"title": title, "body": body, "tag": tag}, ensure_ascii=False),
+                subscription, json.dumps({"title": title, "body": body, "tag": tag, "route": route}, ensure_ascii=False),
                 vapid_private_key=str(self.key_file),
                 vapid_claims={"sub": os.getenv("VAPID_CONTACT", "mailto:assistant@example.invalid")},
                 ttl=3600, timeout=10,
@@ -167,6 +169,34 @@ class Assistant:
         return False
 
     def run_due(self, now):
+        self.run_briefing(now)
+        self.run_review(now)
+
+    def run_review(self, now):
+        # Sunday evening: preview the coming week so finished or changed plans get fixed in time.
+        due = datetime.combine(now.date(), self.review_time, SEOUL)
+        if now.weekday() == 6 and due <= now < due + timedelta(hours=2):
+            self.deliver(f"{now.date().isoformat()}-review", now, "주간 점검",
+                         "다음 주 일정을 미리 확인하고 바뀐 것을 정리하세요.", "weekly-review", "/#review")
+
+    def deliver(self, key, now, title, body, tag, route):
+        retry_before = (now - timedelta(minutes=5)).isoformat()
+        with self.db() as db:
+            devices = db.execute("""
+                SELECT devices.subscription FROM devices
+                LEFT JOIN deliveries ON deliveries.endpoint = devices.endpoint AND deliveries.day = ?
+                WHERE deliveries.endpoint IS NULL OR (deliveries.sent = 0 AND deliveries.attempted <= ?)
+            """, (key, retry_before)).fetchall()
+        for (value,) in devices:
+            sub = json.loads(value)
+            sent = self.notify(sub, title, body, tag, route)
+            with self.db() as db:
+                db.execute("""
+                    INSERT OR REPLACE INTO deliveries
+                    SELECT ?, endpoint, ?, ? FROM devices WHERE endpoint = ?
+                """, (key, now.isoformat(), int(sent), sub["endpoint"]))
+
+    def run_briefing(self, now):
         due = datetime.combine(now.date(), self.briefing_time, SEOUL)
         if not due <= now < due + timedelta(hours=2):
             return
@@ -178,21 +208,7 @@ class Assistant:
             existing = self.briefing(day)
         if not existing or datetime.fromisoformat(existing["generated"]) < due:
             return
-        retry_before = (now - timedelta(minutes=5)).isoformat()
-        with self.db() as db:
-            devices = db.execute("""
-                SELECT devices.subscription FROM devices
-                LEFT JOIN deliveries ON deliveries.endpoint = devices.endpoint AND deliveries.day = ?
-                WHERE deliveries.endpoint IS NULL OR (deliveries.sent = 0 AND deliveries.attempted <= ?)
-            """, (day, retry_before)).fetchall()
-        for (value,) in devices:
-            sub = json.loads(value)
-            sent = self.notify(sub, "오늘의 아침 브리핑", "카이온에서 오늘 브리핑을 확인하세요.", f"briefing-{day}")
-            with self.db() as db:
-                db.execute("""
-                    INSERT OR REPLACE INTO deliveries
-                    SELECT ?, endpoint, ?, ? FROM devices WHERE endpoint = ?
-                """, (day, now.isoformat(), int(sent), sub["endpoint"]))
+        self.deliver(day, now, "오늘의 아침 브리핑", "카이온에서 오늘 브리핑을 확인하세요.", f"briefing-{day}", "/#briefing")
 
     def schedule(self):
         while True:
@@ -281,6 +297,12 @@ def create_app(assistant, code, origin=""):
             life=life_today(assistant.life(), now.date()),
         )
 
+    @app.get("/api/review")
+    @require_login
+    def review():
+        first = datetime.now(SEOUL).date() + timedelta(days=1)
+        return jsonify(week_review(assistant.timetable(), assistant.life(), first))
+
     @app.get("/api/life")
     @require_login
     def get_life():
@@ -366,7 +388,7 @@ def create_app(assistant, code, origin=""):
             abort(400)
         with assistant.db() as db:
             row = db.execute("SELECT subscription FROM devices WHERE endpoint = ?", (endpoint,)).fetchone()
-        if row and assistant.notify(json.loads(row[0]), "AI 비서 알림 테스트", "휴대폰 알림이 연결됐어요.", "briefing-test"):
+        if row and assistant.notify(json.loads(row[0]), "AI 비서 알림 테스트", "휴대폰 알림이 연결됐어요.", "briefing-test", "/#settings"):
             return jsonify(ok=True)
         return jsonify(error="알림이 전송되지 않았어요. 알림을 다시 켜고 시도해 주세요."), 502
 
@@ -393,7 +415,8 @@ def main():
             raise SystemExit("ASSISTANT_ORIGIN에는 https://로 시작하는 사이트 주소만 지정하세요.")
     port = int(os.getenv("ASSISTANT_PORT", "8080"))
     briefing_time = datetime.strptime(os.getenv("BRIEFING_TIME", "07:30"), "%H:%M").time()
-    assistant = Assistant(directory, briefing_time)
+    review_time = datetime.strptime(os.getenv("WEEKLY_REVIEW_TIME", "21:00"), "%H:%M").time()
+    assistant = Assistant(directory, briefing_time, review_time=review_time)
     app = create_app(assistant, code, origin)
     if not origin:
         app.config["TRUSTED_HOSTS"] = ["localhost", "127.0.0.1"]

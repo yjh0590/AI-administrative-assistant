@@ -291,6 +291,26 @@ class AssistantTest(unittest.TestCase):
         self.assistant.notify.assert_called_once()
         self.assertEqual(self.assistant.briefing(self.due.date().isoformat())["generated"], self.due.isoformat())
 
+    def test_sunday_evening_sends_weekly_review_once(self):
+        self.assistant.register({"endpoint": "test-device"})
+        sunday = datetime(2026, 11, 29, 21, 0, tzinfo=SEOUL)
+        self.assistant.run_review(sunday - timedelta(days=1))
+        self.assistant.run_review(sunday - timedelta(minutes=1))
+        self.assistant.notify.assert_not_called()
+        self.assistant.run_review(sunday)
+        self.assistant.run_review(sunday + timedelta(minutes=30))
+        self.assistant.notify.assert_called_once()
+        self.assertEqual(self.assistant.notify.call_args.args[3:], ("weekly-review", "/#review"))
+        self.client.post("/api/session", json={"code": "test-very-long-access-code"})
+        self.assistant.save_timetable({"start": "2026-09-01", "last": "", "routines": [], "classes": [
+            {"kind": "class", "day": 0, "date": "", "start": "15:00", "end": "17:45", "title": "형사법", "room": ""}]})
+        with patch("app.datetime") as clock:
+            clock.now.return_value = sunday
+            review = self.client.get("/api/review").json
+        self.assertEqual([day["date"] for day in review["days"]][::6], ["2026-11-30", "2026-12-06"])
+        self.assertEqual((review["days"][0]["week"], review["days"][0]["classes"][0]["title"]), (14, "형사법"))
+        self.assertIn("현관 바닥 모래·먼지 쓸기", [item["title"] for item in review["days"][3]["chores"]])
+
     def test_schedule_retries_failed_delivery_without_rebuilding(self):
         self.assistant.register({"endpoint": "test-device"})
         self.assistant.notify.side_effect = [False, True]

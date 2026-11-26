@@ -7,7 +7,7 @@ self.addEventListener("push", event => {
     body: data.body ?? "새 브리핑을 확인하세요.",
     icon: "/icon-192.png",
     tag: data.tag ?? "briefing",
-    data: { route: data.tag === "briefing-test" ? "/#settings" : "/#briefing" },
+    data: { route: data.route ?? (data.tag === "briefing-test" ? "/#settings" : "/#briefing") },
   }));
 });
 

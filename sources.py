@@ -294,7 +294,7 @@ def lms_time(value):
     return value.astimezone(SEOUL) if value.tzinfo else value.replace(tzinfo=SEOUL)
 
 
-def lms_items(now):
+def lms_items(now, until=None):
     # Moodle's calendar export (Calendar > Export > Get calendar URL) lists due dates and lecture periods.
     url = os.getenv("LMS_ICAL_URL", "").strip()
     if not url:
@@ -316,8 +316,12 @@ def lms_items(now):
         start = lms_time(event.decoded("dtstart"))
         end = lms_time(event.decoded("dtend")) if event.get("dtend") else start
         due = start == end
+        if until:
+            # A planning window keeps everything due or open between now and until.
+            if not (start < until and end >= now):
+                continue
         # Due dates show for the next three days; lecture periods show while they are open.
-        if (due and not now <= end <= now + timedelta(days=3)) or (not due and not start <= now < end):
+        elif (due and not now <= end <= now + timedelta(days=3)) or (not due and not start <= now < end):
             continue
         title = str(event.get("summary", "")).strip()[:200]
         course = re.sub(r"\s*\(.*$", "", course).strip()[:100]

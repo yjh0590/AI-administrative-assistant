@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/style.css">
   <script src="/timetable.js" defer></script>
   <script src="/life.js" defer></script>
+  <script src="/review.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -55,6 +56,7 @@
         <nav class="menu" aria-label="AI 비서 메뉴">
           <a class="menu-link" href="#school"><span class="tool-icon calendar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>학교 시간표</strong><span class="tool-status" id="school-state">시간표 등록</span></a>
           <a class="menu-link" href="#life"><span class="tool-icon calendar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>생활 캘린더</strong><span class="tool-status" id="life-state">청소와 생활 일정</span></a>
+          <a class="menu-link" href="#review"><span class="tool-icon calendar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>주간 점검</strong><span class="tool-status" id="review-state">다음 주 미리보기</span></a>
           <a class="menu-link" href="#agenda"><span class="tool-icon calendar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>네이버 일정</strong><span class="tool-status" id="agenda-state">오늘 일정</span></a>
           <a class="menu-link" href="#lms"><span class="tool-icon calendar-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>LMS 일정</strong><span class="tool-status" id="lms-state">마감과 온라인 강의</span></a>
           <a class="menu-link" href="#news"><span class="tool-icon news-icon" aria-hidden="true"></span><span class="tool-arrow" aria-hidden="true">↗</span><strong>관심 뉴스</strong><span class="tool-status" id="news-state">기사와 원문</span></a>
@@ -85,6 +87,7 @@
           <a href="https://help.naver.com/service/5620/contents/2426?lang=ko&amp;osType=COMMONOS" target="_blank" rel="noopener noreferrer">네이버 공식 연동 안내 ↗</a>
         </details>
         <div id="briefing" class="cards" hidden></div>
+        <div id="review" class="cards" hidden></div>
         <form id="timetable" class="card" hidden>
           <label for="timetable-photo">에브리타임 시간표 사진</label>
           <p class="muted">요일과 왼쪽 시간 눈금이 보이게 캡처하세요. 읽어온 내용을 확인하고 저장하면 매주 해당 요일에 표시돼요.</p>

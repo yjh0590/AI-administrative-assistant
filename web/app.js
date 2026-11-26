@@ -17,6 +17,7 @@ const featureTitles = {
   briefing: "오늘의 브리핑",
   school: "학교 시간표",
   life: "생활 캘린더",
+  review: "주간 점검",
   agenda: "네이버 일정",
   lms: "LMS 일정",
   news: "관심 뉴스",
@@ -206,13 +207,16 @@ function renderView(navigated = false) {
   const settings = feature === "settings";
   const school = feature === "school";
   const life = feature === "life";
+  const review = feature === "review";
   const fullBriefing = feature === "briefing";
   if (!feature && !$("kaiyon-portrait").hasAttribute("src")) choosePortrait();
   $("menu").hidden = Boolean(feature);
   $("feature").hidden = !feature;
   $("settings").hidden = !settings;
-  $("briefing-tools").hidden = !feature || settings || school || life;
-  $("briefing").hidden = !feature || settings;
+  $("briefing-tools").hidden = !feature || settings || school || life || review;
+  $("briefing").hidden = !feature || settings || review;
+  $("review").hidden = !review;
+  if (review) loadReview(navigated);
   $("timetable").hidden = !school;
   if (school) loadTimetableEditor();
   $("life").hidden = !life;
@@ -229,7 +233,7 @@ function renderView(navigated = false) {
     speechSynthesis.cancel();
     finishSpeaking();
   }
-  if (feature && !settings) {
+  if (feature && !settings && !review) {
     const contentKey = `${feature}:${digest?.generated ?? ""}:${JSON.stringify([schoolToday, schoolRoutines, schoolWeek, lifeToday])}`;
     if (renderedContent !== contentKey) {
       // Briefings saved before a source existed lack its key, so only render the ones present.
